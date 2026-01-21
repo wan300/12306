@@ -1,7 +1,19 @@
 import axios from 'axios'
 
+// 根据环境确定API基础URL
+// 开发模式使用Vite代理，生产模式直接访问后端
+const getBaseURL = () => {
+  // 检查是否在Electron生产环境中
+  if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
+    // Electron生产模式：直接访问后端服务
+    return 'http://localhost:8000/api/v1'
+  }
+  // 开发模式或Web模式：使用相对路径（Vite代理）
+  return '/api/v1'
+}
+
 const request = axios.create({
-  baseURL: '/api/v1',
+  baseURL: getBaseURL(),
   timeout: 60000  // 增加到60秒，给后端更多处理时间
 })
 

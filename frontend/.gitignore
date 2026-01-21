@@ -1,0 +1,28 @@
+# Electron 构建产物
+release/
+dist-electron/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Vite
+dist/
+
+# 编辑器
+.vscode/
+*.swp
+*.swo
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+logs/
+*.log
+
+# 临时文件
+*.tmp
+*.temp

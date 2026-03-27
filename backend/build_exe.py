@@ -3,21 +3,21 @@ import os
 import shutil
 
 # Clean previous build
-if os.path.exists('backend/dist'):
-    shutil.rmtree('backend/dist')
-if os.path.exists('backend/build'):
-    shutil.rmtree('backend/build')
+if os.path.exists('dist'):
+    shutil.rmtree('dist')
+if os.path.exists('build'):
+    shutil.rmtree('build')
 
 # Run PyInstaller
 PyInstaller.__main__.run([
-    'backend/run_server.py',
+    'run_server.py',
     '--name=12306-backend',
     '--onedir',
     '--noconfirm',
     '--clean',
-    '--distpath=backend/dist',
-    '--workpath=backend/build',
-    '--specpath=backend',
+    '--distpath=dist',
+    '--workpath=build',
+    '--specpath=.',
     # Include the app package. 
     # Since run_server imports main, and main imports app, PyInstaller should find it.
     # Hidden imports for Uvicorn
@@ -37,8 +37,8 @@ print("Build complete. Copying data files...")
 
 # Copy data folder structure (empty or with initial files)
 # The config ensures directories, but we should ship assets like station_name.js
-src_data_assets = 'backend/data/assets'
-dst_data_assets = 'backend/dist/12306-backend/data/assets'
+src_data_assets = 'data/assets'
+dst_data_assets = 'dist/12306-backend/data/assets'
 
 if not os.path.exists(dst_data_assets):
     os.makedirs(dst_data_assets)

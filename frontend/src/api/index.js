@@ -5,11 +5,30 @@ import axios from 'axios'
 const getBaseURL = () => {
   // 检查是否在Electron生产环境中
   if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
-    // Electron生产模式：直接访问后端服务
-    return 'http://localhost:8000/api/v1'
+    // Electron生产模式：使用主进程传递的后端地址，避免端口冲突导致 404
+    const backendUrl = window.electronAPI.getBackendUrl?.()
+    return backendUrl || 'http://127.0.0.1:8000/api/v1'
   }
   // 开发模式或Web模式：使用相对路径（Vite代理）
   return '/api/v1'
+}
+
+const normalizeWsBase = (url) => {
+  if (!url) return ''
+  if (url.startsWith('https://')) return url.replace('https://', 'wss://')
+  if (url.startsWith('http://')) return url.replace('http://', 'ws://')
+  if (url.startsWith('wss://') || url.startsWith('ws://')) return url
+  return url
+}
+
+const getTerminalLogsWsUrl = () => {
+  if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
+    const backendUrl = window.electronAPI.getBackendUrl?.() || 'http://127.0.0.1:8000/api/v1'
+    return `${normalizeWsBase(backendUrl)}/logs/ws/terminal`
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/api/v1/logs/ws/terminal`
 }
 
 const request = axios.create({
@@ -109,5 +128,7 @@ export default {
   
   getTaskLogs(taskId, params) {
     return request.get(`/tasks/${taskId}/logs`, { params })
-  }
+  },
+
+  getTerminalLogsWsUrl
 }

@@ -8,6 +8,7 @@
 """
 
 import sys
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -20,7 +21,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import get_settings, ensure_directories
 from app.core.database import init_db, close_db
-from app.api import auth, trains, tasks, users
+from app.api import auth, trains, tasks, users, logs
+from app.core.terminal_logs import (
+    bind_terminal_log_loop,
+    install_terminal_capture,
+    uninstall_terminal_capture,
+)
 from app.tasks.scheduler import get_scheduler
 
 settings = get_settings()
@@ -30,6 +36,9 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
+    bind_terminal_log_loop(asyncio.get_running_loop())
+    install_terminal_capture()
+
     print("\n" + "=" * 50)
     print(f"🚄 {settings.APP_NAME} v{settings.APP_VERSION}")
     print("=" * 50)
@@ -50,18 +59,21 @@ async def lifespan(app: FastAPI):
     print(f"[启动] API 文档: http://localhost:8000/docs")
     print("=" * 50 + "\n")
     
-    yield
-    
-    # 关闭时
-    print("\n[关闭] 正在关闭服务...")
-    
-    # 关闭调度器
-    scheduler.shutdown()
-    
-    # 关闭数据库连接
-    await close_db()
-    
-    print("[关闭] 服务已关闭\n")
+    try:
+        yield
+    finally:
+        # 关闭时
+        print("\n[关闭] 正在关闭服务...")
+
+        # 关闭调度器
+        scheduler.shutdown()
+
+        # 关闭数据库连接
+        await close_db()
+
+        uninstall_terminal_capture()
+
+        print("[关闭] 服务已关闭\n")
 
 
 # 创建应用
@@ -117,6 +129,7 @@ app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 app.include_router(trains.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tasks.router, prefix=settings.API_V1_PREFIX)
+app.include_router(logs.router, prefix=settings.API_V1_PREFIX)
 
 
 # 根路由

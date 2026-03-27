@@ -55,6 +55,10 @@
                 <el-icon><Search /></el-icon>
                 <span>车票查询</span>
               </el-menu-item>
+              <el-menu-item index="/logs">
+                <el-icon><Document /></el-icon>
+                <span>后端日志</span>
+              </el-menu-item>
             </el-menu>
           </el-aside>
           

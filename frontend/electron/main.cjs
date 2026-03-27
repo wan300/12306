@@ -2,10 +2,33 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const { spawn } = require('child_process')
 const fs = require('fs')
+const net = require('net')
 
 // 保存后端进程引用
 let backendProcess = null
+let backendPort = 8000
+let backendUrl = null
 let mainWindow = null
+
+// 获取可用端口，优先尝试首选端口，失败则使用系统分配的随机端口
+const findAvailablePort = (preferredPort) => {
+  return new Promise((resolvePort) => {
+    const server = net.createServer()
+
+    server.once('error', () => {
+      const fallback = net.createServer()
+      fallback.listen(0, () => {
+        const freePort = fallback.address().port
+        fallback.close(() => resolvePort(freePort))
+      })
+    })
+
+    server.listen(preferredPort, () => {
+      const freePort = server.address().port
+      server.close(() => resolvePort(freePort))
+    })
+  })
+}
 
 // 判断是否为开发环境
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
@@ -39,10 +62,13 @@ function getBackendPath() {
 
 // 启动后端服务
 async function startBackend() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     if (isDev) {
       // 开发模式：假设后端已经在运行
       console.log('[Backend] Development mode - assuming backend is running on port 8000')
+      backendPort = 8000
+      backendUrl = `http://127.0.0.1:${backendPort}/api/v1`
+      process.env.BACKEND_URL = backendUrl
       resolve()
       return
     }
@@ -54,6 +80,11 @@ async function startBackend() {
     }
     
     console.log('[Backend] Starting backend server...')
+
+    backendPort = await findAvailablePort(8000)
+    backendUrl = `http://127.0.0.1:${backendPort}/api/v1`
+    process.env.BACKEND_URL = backendUrl
+    console.log(`[Backend] Using port: ${backendPort}`)
     
     // 设置工作目录为后端目录
     const backendDir = path.dirname(backendPath)
@@ -62,6 +93,11 @@ async function startBackend() {
       cwd: backendDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true, // Windows下隐藏控制台窗口
+      env: {
+        ...process.env,
+        BACKEND_PORT: backendPort.toString(),
+        BACKEND_HOST: '0.0.0.0',
+      },
     })
     
     backendProcess.stdout.on('data', (data) => {
@@ -124,6 +160,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
+      additionalArguments: backendUrl ? [`--backend-url=${backendUrl}`] : [],
     },
     show: false, // 先隐藏，等加载完成再显示
   })
@@ -195,4 +232,8 @@ ipcMain.handle('get-app-version', () => {
 
 ipcMain.handle('get-app-path', () => {
   return app.getAppPath()
+})
+
+ipcMain.handle('get-backend-url', () => {
+  return backendUrl || `http://127.0.0.1:${backendPort}/api/v1`
 })

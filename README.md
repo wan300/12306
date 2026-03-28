@@ -53,3 +53,42 @@ npm run dev
 
 访问地址: http://localhost:5173 (默认 Vite 端口)
 - 本项目仅供学习交流使用，请勿用于非法用途。
+
+## Docker 一键运行（前后端）
+
+已提供前后端容器化配置，执行以下命令即可一键启动：
+
+```bash
+# 在项目根目录执行
+docker compose up -d --build
+```
+
+启动后访问：
+
+- 前端页面: http://localhost:5173
+- 后端 API 文档: http://localhost:8000/docs
+
+### 常用命令
+
+```bash
+# 查看服务状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f
+
+# 仅看后端日志
+docker compose logs -f backend
+
+# 停止并移除容器
+docker compose down
+```
+
+### 数据持久化
+
+`docker-compose.yml` 已将宿主机目录 `backend/data` 挂载到容器内 `/app/backend/data`，数据库、会话、日志会被保留。
+
+### 说明
+
+- 该 Docker 方案为 Web 版前后端一键运行，不包含 Electron 桌面 GUI 容器化。
+- 前端通过 Nginx 反向代理 `/api` 和 WebSocket 到后端容器，无需改动现有业务 API 调用。

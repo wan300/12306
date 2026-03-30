@@ -3,6 +3,7 @@ const path = require('path')
 const { spawn } = require('child_process')
 const fs = require('fs')
 const net = require('net')
+const http = require('http')
 
 // 保存后端进程引用
 let backendProcess = null
@@ -33,6 +34,45 @@ const findAvailablePort = (preferredPort) => {
 // 判断是否为开发环境
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+const delay = (ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
+
+const probeBackend = (port, endpoint = '/health', timeout = 1200) => {
+  return new Promise((resolveProbe) => {
+    const req = http.get(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: endpoint,
+        timeout,
+      },
+      (res) => {
+        res.resume()
+        resolveProbe(res.statusCode >= 200 && res.statusCode < 500)
+      }
+    )
+
+    req.on('error', () => resolveProbe(false))
+    req.on('timeout', () => {
+      req.destroy()
+      resolveProbe(false)
+    })
+  })
+}
+
+const waitForBackendReady = async (port, timeoutMs = 30000, intervalMs = 500) => {
+  const startAt = Date.now()
+
+  while (Date.now() - startAt < timeoutMs) {
+    const ready = await probeBackend(port)
+    if (ready) {
+      return true
+    }
+    await delay(intervalMs)
+  }
+
+  return false
+}
+
 // 获取后端可执行文件路径
 function getBackendPath() {
   if (isDev) {
@@ -45,8 +85,6 @@ function getBackendPath() {
     // Windows
     path.join(process.resourcesPath, 'backend', '12306-backend.exe'),
     path.join(app.getAppPath(), '..', 'backend', '12306-backend.exe'),
-    // 备用路径
-    path.join(__dirname, '..', '..', 'backend', 'dist', '12306-backend', '12306-backend.exe'),
   ]
   
   for (const p of possiblePaths) {
@@ -62,73 +100,82 @@ function getBackendPath() {
 
 // 启动后端服务
 async function startBackend() {
-  return new Promise(async (resolve, reject) => {
-    if (isDev) {
-      // 开发模式：假设后端已经在运行
-      console.log('[Backend] Development mode - assuming backend is running on port 8000')
-      backendPort = 8000
-      backendUrl = `http://127.0.0.1:${backendPort}/api/v1`
-      process.env.BACKEND_URL = backendUrl
-      resolve()
-      return
-    }
-    
-    const backendPath = getBackendPath()
-    if (!backendPath) {
-      reject(new Error('Backend executable not found'))
-      return
-    }
-    
-    console.log('[Backend] Starting backend server...')
-
-    backendPort = await findAvailablePort(8000)
+  if (isDev) {
+    // 开发模式：默认后端端口 8000，并做轻量探活提示
+    console.log('[Backend] Development mode - checking backend on port 8000')
+    backendPort = 8000
     backendUrl = `http://127.0.0.1:${backendPort}/api/v1`
     process.env.BACKEND_URL = backendUrl
-    console.log(`[Backend] Using port: ${backendPort}`)
-    
-    // 设置工作目录为后端目录
-    const backendDir = path.dirname(backendPath)
-    
-    backendProcess = spawn(backendPath, [], {
-      cwd: backendDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true, // Windows下隐藏控制台窗口
-      env: {
-        ...process.env,
-        BACKEND_PORT: backendPort.toString(),
-        BACKEND_HOST: '0.0.0.0',
-      },
-    })
-    
-    backendProcess.stdout.on('data', (data) => {
-      const output = data.toString()
-      console.log('[Backend]', output)
-      
-      // 检测服务是否启动成功
-      if (output.includes('服务启动成功') || output.includes('Uvicorn running')) {
-        resolve()
-      }
-    })
-    
-    backendProcess.stderr.on('data', (data) => {
-      console.error('[Backend Error]', data.toString())
-    })
-    
-    backendProcess.on('error', (err) => {
-      console.error('[Backend] Failed to start:', err)
-      reject(err)
-    })
-    
-    backendProcess.on('exit', (code) => {
-      console.log('[Backend] Process exited with code:', code)
-      backendProcess = null
-    })
-    
-    // 设置超时，如果10秒内没有启动成功也继续
-    setTimeout(() => {
-      resolve()
-    }, 10000)
+
+    const ready = await waitForBackendReady(backendPort, 5000, 500)
+    if (!ready) {
+      console.warn('[Backend] Backend is not ready on port 8000. Please start backend manually.')
+    }
+    return
+  }
+
+  const backendPath = getBackendPath()
+  if (!backendPath) {
+    throw new Error('Backend executable not found')
+  }
+
+  console.log('[Backend] Starting backend server...')
+
+  backendPort = await findAvailablePort(8000)
+  backendUrl = `http://127.0.0.1:${backendPort}/api/v1`
+  process.env.BACKEND_URL = backendUrl
+  console.log(`[Backend] Using port: ${backendPort}`)
+
+  // 设置工作目录为后端目录
+  const backendDir = path.dirname(backendPath)
+
+  backendProcess = spawn(backendPath, [], {
+    cwd: backendDir,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true, // Windows下隐藏控制台窗口
+    env: {
+      ...process.env,
+      BACKEND_PORT: backendPort.toString(),
+      BACKEND_HOST: '0.0.0.0',
+    },
   })
+
+  backendProcess.stdout.on('data', (data) => {
+    console.log('[Backend]', data.toString())
+  })
+
+  backendProcess.stderr.on('data', (data) => {
+    console.error('[Backend Error]', data.toString())
+  })
+
+  backendProcess.on('error', (err) => {
+    console.error('[Backend] Failed to start:', err)
+  })
+
+  backendProcess.on('exit', (code) => {
+    console.log('[Backend] Process exited with code:', code)
+    backendProcess = null
+  })
+
+  const startupResult = await Promise.race([
+    waitForBackendReady(backendPort, 30000, 500).then((ready) =>
+      ready ? { type: 'ready' } : { type: 'timeout' }
+    ),
+    new Promise((resolveStartup) => {
+      backendProcess.once('exit', (code) => resolveStartup({ type: 'exit', code }))
+    }),
+  ])
+
+  if (startupResult.type === 'ready') {
+    console.log(`[Backend] Ready at ${backendUrl}`)
+    return
+  }
+
+  if (startupResult.type === 'exit') {
+    throw new Error(`[Backend] Exited before ready, code: ${startupResult.code}`)
+  }
+
+  throw new Error('[Backend] Startup timeout after 30s')
 }
 
 // 停止后端服务

@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     install_terminal_capture()
 
     print("\n" + "=" * 50)
-    print(f"🚄 {settings.APP_NAME} v{settings.APP_VERSION}")
+    print(f"{settings.APP_NAME} v{settings.APP_VERSION}")
     print("=" * 50)
     
     # 确保目录存在

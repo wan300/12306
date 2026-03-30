@@ -83,8 +83,7 @@ npm run electron:build:linux # Linux
 打包完成后，在 `frontend/release/` 目录下会生成：
 
 ### Windows
-- `12306抢票助手-1.0.0-x64.exe` - NSIS 安装程序
-- `12306抢票助手-1.0.0-x64.exe` - 便携版（portable）
+- `12306抢票助手-1.0.0-x64.exe` - NSIS 安装程序（当前默认目标）
 
 ### macOS
 - `12306抢票助手-1.0.0-arm64.dmg` - DMG 安装包
@@ -124,7 +123,7 @@ npm run electron:build:linux # Linux
 ```
 
 - `extraResources`: 将后端可执行文件打包到应用资源中
-- `nsis`: Windows 安装程序配置
+- `nsis`: Windows 安装程序配置（支持自定义安装目录）
 - `mac`/`linux`: 其他平台配置
 
 ### Electron 主进程 (main.js)
@@ -139,6 +138,10 @@ npm run electron:build:linux # Linux
 ### Q: 启动时提示"Backend executable not found"
 
 A: 确保先运行 `python build_exe.py` 构建后端，或检查后端可执行文件路径。
+
+### Q: Electron 打开后页面能显示，但接口请求失败
+
+A: 检查后端是否已正常启动并监听本机端口；在生产模式下应用会自动探测后端健康状态。
 
 ### Q: 打包后 API 请求失败
 

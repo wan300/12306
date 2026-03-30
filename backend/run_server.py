@@ -13,7 +13,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("BACKEND_PORT", "8000"))
 
     print("=" * 60)
-    print("🚄 12306 后端服务启动中...")
+    print("12306 后端服务启动中...")
     print("=" * 60)
     print(f"监听地址: http://127.0.0.1:{port}")
     print(f"API文档: http://127.0.0.1:{port}/docs")

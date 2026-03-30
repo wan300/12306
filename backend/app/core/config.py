@@ -79,7 +79,15 @@ class Settings(BaseSettings):
         return str(self.DATA_DIR / "logs")
     
     # CORS 配置
-    CORS_ORIGINS: list = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"]
+    # Electron 在 file 协议下通常发送 Origin: null
+    CORS_ORIGINS: list = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        "null",
+        "file://",
+    ]
     
     # JWT 配置（如果需要用户认证）
     SECRET_KEY: str = "your-secret-key-change-in-production"

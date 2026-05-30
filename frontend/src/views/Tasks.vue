@@ -22,99 +22,104 @@
       </template>
       
       <el-table :data="filteredTasks" stripe v-loading="taskStore.loading">
-        <el-table-column prop="name" label="任务名称" min-width="150">
+        <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <el-link type="primary" @click="$router.push(`/task/${row.id}`)">
               {{ row.name }}
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column label="行程" min-width="160">
+        <el-table-column label="行程" :min-width="isMobile ? 140 : 180" align="center">
           <template #default="{ row }">
             {{ row.from_station }} → {{ row.to_station }}
           </template>
         </el-table-column>
-        <el-table-column prop="train_date" label="日期" width="110" />
-        <el-table-column prop="seat_types" label="席别" width="100" />
-        <el-table-column prop="retry_count" label="重试次数" width="90" align="center" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column v-if="!isMobile" prop="train_date" label="日期" min-width="110" align="center" />
+        <el-table-column v-if="!isMobile" prop="seat_types" label="席别" min-width="100" align="center" />
+        <el-table-column v-if="!isMobile" prop="retry_count" label="重试次数" min-width="90" align="center" />
+        <el-table-column prop="status" label="状态" :min-width="isMobile ? 80 : 100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
+            <el-tag :type="getStatusType(row.status)" size="small">
               {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" :min-width="isMobile ? 180 : 230" :fixed="isMobile ? false : 'right'" align="center">
           <template #default="{ row }">
-            <el-button-group>
-              <el-button 
-                v-if="row.status === 'pending' || row.status === 'paused' || row.status === 'failed' || row.status === 'cancelled'"
-                type="primary" 
+            <div class="action-buttons">
+              <div class="action-group">
+                <el-button
+                  v-if="['pending', 'paused', 'failed', 'cancelled'].includes(row.status)"
+                  type="primary"
+                  size="small"
+                  @click="$router.push(`/edit-task/${row.id}`)"
+                >
+                  编辑
+                </el-button>
+                <el-button
+                  v-if="['pending', 'paused'].includes(row.status)"
+                  type="success"
+                  size="small"
+                  :loading="processingTasks[row.id]"
+                  @click="handleStart(row)"
+                >
+                  启动
+                </el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  type="warning"
+                  size="small"
+                  :loading="processingTasks[row.id]"
+                  @click="handleStop(row)"
+                >
+                  暂停
+                </el-button>
+                <el-button
+                  v-if="row.status !== 'success' && row.status !== 'cancelled'"
+                  type="danger"
+                  size="small"
+                  :loading="processingTasks[row.id]"
+                  @click="handleCancel(row)"
+                >
+                  取消
+                </el-button>
+              </div>
+              <el-button
+                v-if="row.status !== 'running'"
+                type="danger"
                 size="small"
-                @click="$router.push(`/edit-task/${row.id}`)"
-              >
-                编辑
-              </el-button>
-              <el-button 
-                v-if="['pending', 'paused'].includes(row.status)"
-                type="success" 
-                size="small"
-                :loading="processingTasks[row.id]"
-                @click="handleStart(row)"
-              >
-                启动
-              </el-button>
-              <el-button 
-                v-if="row.status === 'running'" 
-                type="warning" 
-                size="small"
-                :loading="processingTasks[row.id]"
-                @click="handleStop(row)"
-              >
-                暂停
-              </el-button>
-              <el-button 
-                v-if="row.status !== 'success' && row.status !== 'cancelled'" 
-                type="danger" 
-                size="small"
-                :loading="processingTasks[row.id]"
-                @click="handleCancel(row)"
-              >
-                取消
-              </el-button>
-              <el-button 
-                v-if="row.status !== 'running'" 
-                type="danger" 
-                size="small"
-                text
+                link
+                class="btn-delete"
                 :loading="processingTasks[row.id]"
                 @click="handleDelete(row)"
               >
                 删除
               </el-button>
-            </el-button-group>
+            </div>
           </template>
         </el-table-column>
+        <template #empty>
+          <el-empty description="暂无任务" />
+        </template>
       </el-table>
-      
-      <el-empty v-if="filteredTasks.length === 0 && !taskStore.loading" description="暂无任务">
-        <el-button type="primary" @click="$router.push('/create-task')">创建任务</el-button>
-      </el-empty>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTaskStore } from '../stores/task'
-import { useUserStore } from '../stores/user'
 
 const taskStore = useTaskStore()
-const userStore = useUserStore()
 
 const filterStatus = ref('')
 const processingTasks = ref({})
+const isMobile = ref(false)
+
+const checkScreenSize = () => {
+  isMobile.value = window.innerWidth < 768
+}
 
 const filteredTasks = computed(() => {
   if (!filterStatus.value) return taskStore.tasks
@@ -203,7 +208,13 @@ const handleDelete = async (task) => {
 }
 
 onMounted(async () => {
+  checkScreenSize()
+  window.addEventListener('resize', checkScreenSize)
   await taskStore.fetchTasks()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkScreenSize)
 })
 </script>
 
@@ -217,5 +228,62 @@ onMounted(async () => {
 .header-actions {
   display: flex;
   align-items: center;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-group {
+  display: flex;
+}
+
+.action-group .el-button {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  padding: 8px 15px;
+}
+
+.action-group .el-button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.action-group .el-button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.action-group .el-button:not(:first-child) {
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.btn-delete {
+  margin-left: 12px;
+}
+
+@media (max-width: 768px) {
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .header-actions .el-select {
+    flex: 1;
+    margin-right: 12px !important;
+  }
+
+  .action-group .el-button {
+    padding: 6px 10px;
+  }
 }
 </style>

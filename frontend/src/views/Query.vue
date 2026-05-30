@@ -4,51 +4,51 @@
       <template #header>
         <span>车票查询</span>
       </template>
-      
+
       <el-form :inline="true" :model="queryForm" class="query-form">
-        <el-form-item label="出发站">
-          <el-select 
-            v-model="queryForm.from_station" 
-            filterable 
+        <el-form-item label="出发站" class="form-item-compact">
+          <el-select
+            v-model="queryForm.from_station"
+            filterable
             remote
             :remote-method="searchFromStation"
             :loading="loadingFrom"
-            placeholder="输入站名"
-            style="width: 150px;"
+            placeholder="出发地"
+            style="width: 130px;"
           >
-            <el-option 
-              v-for="s in fromStations" 
-              :key="s.code" 
-              :label="s.name" 
+            <el-option
+              v-for="s in fromStations"
+              :key="s.code"
+              :label="s.name"
               :value="s.name"
             />
           </el-select>
         </el-form-item>
-        
-        <el-form-item>
-          <el-button :icon="Switch" circle @click="swapStations" />
-        </el-form-item>
-        
-        <el-form-item label="到达站">
-          <el-select 
-            v-model="queryForm.to_station" 
-            filterable 
+
+        <div class="swap-wrapper">
+           <el-button :icon="Switch" circle @click="swapStations" class="swap-btn" />
+        </div>
+
+        <el-form-item label="到达站" class="form-item-compact">
+          <el-select
+            v-model="queryForm.to_station"
+            filterable
             remote
             :remote-method="searchToStation"
             :loading="loadingTo"
-            placeholder="输入站名"
-            style="width: 150px;"
+            placeholder="目的地"
+            style="width: 130px;"
           >
-            <el-option 
-              v-for="s in toStations" 
-              :key="s.code" 
-              :label="s.name" 
+            <el-option
+              v-for="s in toStations"
+              :key="s.code"
+              :label="s.name"
               :value="s.name"
             />
           </el-select>
         </el-form-item>
-        
-        <el-form-item label="出发日期">
+
+        <el-form-item label="日期" class="form-item-compact">
           <el-date-picker
             v-model="queryForm.train_date"
             type="date"
@@ -56,11 +56,12 @@
             format="YYYY-MM-DD"
             value-format="YYYY-MM-DD"
             style="width: 150px;"
+            :disabled-date="disabledDate"
           />
         </el-form-item>
-        
+
         <el-form-item label="车次类型">
-          <el-select v-model="queryForm.train_types" placeholder="全部" clearable style="width: 120px;">
+          <el-select v-model="queryForm.train_types" placeholder="全部" clearable style="width: 110px;">
             <el-option label="高铁 G" value="G" />
             <el-option label="动车 D" value="D" />
             <el-option label="城际 C" value="C" />
@@ -69,11 +70,11 @@
             <el-option label="快速 K" value="K" />
           </el-select>
         </el-form-item>
-        
+
         <el-form-item>
           <el-checkbox v-model="queryForm.only_has_ticket">只看有票</el-checkbox>
         </el-form-item>
-        
+
         <el-form-item>
           <el-button type="primary" @click="handleQuery" :loading="loading">
             <el-icon><Search /></el-icon>
@@ -82,7 +83,7 @@
         </el-form-item>
       </el-form>
     </el-card>
-    
+
     <el-card style="margin-top: 16px;" v-if="trains.length > 0 || loading">
       <template #header>
         <div class="result-header">
@@ -90,10 +91,10 @@
             <span>查询结果 ({{ trains.length }} 趟)</span>
             <el-tag v-if="queryForm.train_date">{{ queryForm.train_date }}</el-tag>
           </div>
-          <el-button 
-            type="success" 
-            size="small" 
-            :icon="Ticket" 
+          <el-button
+            type="success"
+            size="small"
+            :icon="Ticket"
             :disabled="selectedTrains.length === 0"
             @click="handleCreateTask"
           >
@@ -101,68 +102,76 @@
           </el-button>
         </div>
       </template>
-      
-      <el-table :data="trains" stripe v-loading="loading" max-height="500" @selection-change="handleSelectionChange">
-        <el-table-column type="selection" width="45" fixed />
-        <el-table-column prop="train_code" label="车次" width="80" fixed>
+
+      <el-table :data="trains" stripe v-loading="loading" max-height="550" @selection-change="handleSelectionChange">
+        <el-table-column type="selection" min-width="50" fixed="left" align="center" />
+        <el-table-column prop="train_code" label="车次" min-width="100" fixed="left" align="center">
           <template #default="{ row }">
-            <el-tag :type="getTrainType(row.train_code)" size="small">
+            <el-tag :style="getTrainTagStyle(row.train_code)" effect="plain" style="font-weight: bold;">
               {{ row.train_code }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="出发/到达" width="180">
+        <el-table-column label="出发 - 到达" min-width="240" align="center">
           <template #default="{ row }">
-            <div class="station-info">
-              <div>{{ row.from_station }}</div>
-              <div class="time">{{ row.start_time }}</div>
+            <div class="trip-info">
+              <div class="station from">
+                <span class="name">{{ row.from_station }}</span>
+                <span class="time start">{{ row.start_time }}</span>
+              </div>
+              <div class="arrow">
+                <span class="duration">{{ row.duration }}</span>
+                <el-icon><Right /></el-icon>
+                <span class="date-diff" v-if="false">TODO</span>
+              </div>
+              <div class="station to">
+                <span class="name">{{ row.to_station }}</span>
+                <span class="time arrive">{{ row.arrive_time }}</span>
+              </div>
             </div>
-            <el-icon><Right /></el-icon>
-            <div class="station-info">
-              <div>{{ row.to_station }}</div>
-              <div class="time">{{ row.arrive_time }}</div>
-            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="duration" label="历时" width="80" align="center" />
-        <el-table-column prop="business_seat" label="商务座" width="70" align="center">
+
+        <el-table-column prop="business_seat" label="商务" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.business_seat)">{{ row.business_seat }}</span>
+            <div :class="['seat-info', getSeatClass(row.business_seat)]">{{ row.business_seat }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="first_seat" label="一等座" width="70" align="center">
+        <el-table-column prop="first_seat" label="一等" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.first_seat)">{{ row.first_seat }}</span>
+            <div :class="['seat-info', getSeatClass(row.first_seat)]">{{ row.first_seat }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="second_seat" label="二等座" width="70" align="center">
+        <el-table-column prop="second_seat" label="二等" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.second_seat)">{{ row.second_seat }}</span>
+            <div :class="['seat-info', getSeatClass(row.second_seat)]">{{ row.second_seat }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="soft_sleeper" label="软卧" width="70" align="center">
+        <el-table-column prop="soft_sleeper" label="软卧" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.soft_sleeper)">{{ row.soft_sleeper }}</span>
+            <div :class="['seat-info', getSeatClass(row.soft_sleeper)]">{{ row.soft_sleeper }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="hard_sleeper" label="硬卧" width="70" align="center">
+        <el-table-column prop="hard_sleeper" label="硬卧" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.hard_sleeper)">{{ row.hard_sleeper }}</span>
+            <div :class="['seat-info', getSeatClass(row.hard_sleeper)]">{{ row.hard_sleeper }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="hard_seat" label="硬座" width="70" align="center">
+        <el-table-column prop="hard_seat" label="硬座" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.hard_seat)">{{ row.hard_seat }}</span>
+            <div :class="['seat-info', getSeatClass(row.hard_seat)]">{{ row.hard_seat }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="no_seat" label="无座" width="70" align="center">
+         <el-table-column prop="no_seat" label="无座" min-width="70" align="center">
           <template #default="{ row }">
-            <span :class="getSeatClass(row.no_seat)">{{ row.no_seat }}</span>
+            <div :class="['seat-info', getSeatClass(row.no_seat)]">{{ row.no_seat }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="100">
+
+        <el-table-column label="操作" min-width="90" fixed="right" align="center">
           <template #default="{ row }">
-            <el-tag v-if="!row.can_buy" type="info" size="small">不可购买</el-tag>
+            <el-tag v-if="!row.can_buy" type="info" size="small">停运</el-tag>
+            <span v-else>--</span>
           </template>
         </el-table-column>
       </el-table>
@@ -231,7 +240,7 @@ const handleQuery = async () => {
     ElMessage.warning('请填写完整查询条件')
     return
   }
-  
+
   loading.value = true
   try {
     const res = await api.queryTickets({
@@ -241,7 +250,7 @@ const handleQuery = async () => {
       train_types: queryForm.train_types || undefined,
       only_has_ticket: queryForm.only_has_ticket
     })
-    
+
     if (res.success) {
       trains.value = res.trains
       if (trains.value.length === 0) {
@@ -274,12 +283,42 @@ const handleCreateTask = () => {
   })
 }
 
-const getTrainType = (code) => {
-  if (code.startsWith('G')) return 'danger'
-  if (code.startsWith('D')) return 'warning'
-  if (code.startsWith('C')) return ''
-  if (code.startsWith('Z')) return 'success'
-  return 'info'
+const getTrainTagStyle = (code) => {
+  if (!code) return {}
+  const first = code[0].toUpperCase()
+
+  let color = '#409EFF' // Default Blue
+
+  // Standard colors
+  if (first === 'G') color = '#F56C6C' // Red
+  else if (first === 'D') color = '#409EFF' // Blue
+  else if (first === 'Z' || first === 'T') color = '#67C23A' // Green
+  else if (first === 'K' || first === 'C') color = '#E6A23C' // Orange
+  else {
+    // Hash based colors
+    const colors = [
+      '#722ED1', '#13C2C2', '#EB2F96', '#FAAD14',
+      '#2F54EB', '#FA541C', '#1890FF', '#52C41A'
+    ]
+    let hash = 0
+    for (let i = 0; i < code.length; i++) {
+      hash = code.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    color = colors[Math.abs(hash) % colors.length]
+  }
+
+  return {
+    color: color,
+    borderColor: color,
+    backgroundColor: hexToRgba(color, 0.1)
+  }
+}
+
+const hexToRgba = (hex, alpha) => {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 const getSeatClass = (value) => {
@@ -291,13 +330,107 @@ const getSeatClass = (value) => {
   if (!isNaN(num) && num > 0) return 'seat-has'
   return 'seat-none'
 }
+const disabledDate = (time) => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return time.getTime() < today.getTime()
+}
 </script>
 
 <style scoped>
 .query-form {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.query-form .el-form-item {
+  margin-right: 0;
+  margin-bottom: 0;
+}
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  .query-form {
+    flex-wrap: wrap;
+    gap: 0;
+    justify-content: space-between;
+  }
+
+  .query-form .el-form-item {
+    margin-right: 0;
+    margin-bottom: 0;
+  }
+
+  .query-form > :nth-child(1) {
+    width: 42%;
+  }
+  .swap-wrapper {
+    width: 16%; /* 剩余空间 100 - 42 - 42 = 16% */
+    padding: 0;
+    display: flex;
+    justify-content: center;
+  }
+
+  .swap-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    border: none;
+    background: transparent;
+  }
+
+  .query-form > :nth-child(3) {
+    width: 42%;
+  }
+
+  .query-form > :nth-child(4) {
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .query-form > :nth-child(5) {
+    width: 42%;
+    margin-top: 4px;
+  }
+
+  .query-form > :nth-child(6) {
+    width: 42%;
+    margin-top: 4px;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    margin-right: 0;
+  }
+
+  .query-form > :nth-child(7) {
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  .query-form .el-form-item :deep(.el-input),
+  .query-form .el-form-item :deep(.el-select),
+  .query-form .el-form-item :deep(.el-date-editor) {
+    width: 100% !important;
+  }
+
+  .query-form .el-button {
+    width: 100%;
+  }
+
+  .form-item-compact :deep(.el-form-item__label) {
+    display: none; /* 移动端隐藏标签 */
+  }
+}
+
+.swap-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
 }
 
 .result-header {
@@ -306,20 +439,61 @@ const getSeatClass = (value) => {
   align-items: center;
 }
 
-.station-info {
-  display: inline-flex;
+.train-code-cell {
+  font-weight: bold;
+  font-size: 16px;
+  color: #303133;
+}
+
+.trip-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+}
+
+.station {
+  display: flex;
   flex-direction: column;
   align-items: center;
 }
 
-.station-info .time {
-  font-size: 12px;
+.station .name {
+  font-size: 14px;
+}
+
+.station .time {
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.station .time.start {
+  color: #303133;
+}
+
+.station .time.arrive {
+  color: #303133;
+}
+
+.arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   color: #909399;
+  font-size: 12px;
+}
+
+.duration {
+  margin-bottom: -4px;
+}
+
+.seat-info {
+  font-weight: 500;
 }
 
 .seat-has {
   color: #67C23A;
-  font-weight: bold;
 }
 
 .seat-none {

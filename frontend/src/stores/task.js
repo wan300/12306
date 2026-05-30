@@ -8,10 +8,10 @@ export const useTaskStore = defineStore('task', () => {
   const taskLogs = ref([])
   const loading = ref(false)
 
-  async function fetchTasks(userId = null, status = null) {
+  async function fetchTasks(status = null) {
     loading.value = true
     try {
-      const res = await api.getTasks({ user_id: userId, status })
+      const res = await api.getTasks({ status })
       tasks.value = res.tasks || []
     } catch (error) {
       console.error('获取任务列表失败:', error)
@@ -32,9 +32,9 @@ export const useTaskStore = defineStore('task', () => {
     }
   }
 
-  async function createTask(taskData, userId) {
+  async function createTask(taskData) {
     try {
-      const res = await api.createTask(taskData, userId)
+      const res = await api.createTask(taskData)
       if (res.success) {
         tasks.value.unshift(res.data)
         return res.data

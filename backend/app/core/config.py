@@ -90,8 +90,11 @@ class Settings(BaseSettings):
     ]
     
     # JWT 配置（如果需要用户认证）
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str = "please-change-secret-key-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7天
+
+    # 安全开关：默认关闭全局终端日志流，避免多用户环境下的信息泄露
+    ENABLE_TERMINAL_LOG_STREAM: bool = False
     
     class Config:
         env_file = ".env"

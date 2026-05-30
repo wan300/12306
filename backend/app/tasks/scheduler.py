@@ -18,11 +18,13 @@ from sqlalchemy import select, update
 
 from ..core.config import get_settings
 from ..core.database import AsyncSessionLocal
+from ..models.config import SystemConfig
 from ..models.user import User
 from ..models.task import Task, TaskLog, TaskStatus
 from ..services.login_service import LoginService
 from ..services.query_service import QueryService
 from ..services.order_service import OrderService, Passenger
+from ..utils import notify
 
 settings = get_settings()
 
@@ -68,12 +70,54 @@ class TicketScheduler:
         
         # 服务实例缓存
         self._login_services: Dict[str, LoginService] = {}
+
+        # 通知配置缓存
+        self._notification_config: Dict = {}
     
     def start(self):
         """启动调度器"""
         if not self.scheduler.running:
             self.scheduler.start()
             print("[调度] 调度器已启动")
+            asyncio.create_task(self.reload_notification_config())
+
+    async def reload_notification_config(self):
+        """重新加载通知配置。"""
+        async with AsyncSessionLocal() as db:
+            stmt = select(SystemConfig).where(SystemConfig.key == "notification_settings")
+            result = await db.execute(stmt)
+            config = result.scalar_one_or_none()
+
+            if not config or not config.value:
+                self._notification_config = {}
+                return
+
+            try:
+                loaded = json.loads(config.value)
+                loaded.setdefault("HITOKOTO", "false")
+                self._notification_config = loaded
+                print("[调度] 通知配置已加载")
+            except Exception as exc:
+                self._notification_config = {}
+                print(f"[调度] 通知配置解析失败: {exc}")
+
+    def _send_notification(self, title: str, content: str):
+        """按当前通知配置发送消息。"""
+        if not self._notification_config:
+            return
+
+        try:
+            notify.send(
+                title,
+                content,
+                ignore_default_config=True,
+                **self._notification_config,
+            )
+        except Exception as exc:
+            print(f"[调度] 发送通知失败: {exc}")
+
+    def _task_summary(self, task: Task) -> str:
+        return f"{task.name}\n行程: {task.from_station} -> {task.to_station}\n日期: {task.train_date}"
     
     def shutdown(self):
         """关闭调度器"""
@@ -170,6 +214,10 @@ class TicketScheduler:
                 task.finished_at = datetime.utcnow() + timedelta(hours=8)
                 
                 await self._add_log(db, task_id, "error", "任务失败：超过最大重试次数")
+                self._send_notification(
+                    "12306 助手：抢票失败",
+                    f"{self._task_summary(task)}\n原因: 超过最大重试次数\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                )
                 await db.commit()
                 await self.stop_task(task_id)
                 return
@@ -187,6 +235,10 @@ class TicketScheduler:
                 await self._add_log(db, task_id, "error", "用户未登录")
                 task.status = TaskStatus.FAILED
                 task.result_message = "用户未登录"
+                self._send_notification(
+                    "12306 助手：抢票异常",
+                    f"{self._task_summary(task)}\n原因: 用户未登录或会话丢失\n请重新登录后重启任务。",
+                )
                 await db.commit()
                 await self.stop_task(task_id)
                 return
@@ -203,7 +255,7 @@ class TicketScheduler:
             await db.commit()
             
             try:
-                success, order_id, message = await self._query_and_order(
+                success, order_id, message, extra_data = await self._query_and_order(
                     task, cookies, db
                 )
                 
@@ -214,6 +266,20 @@ class TicketScheduler:
                     task.finished_at = datetime.utcnow() + timedelta(hours=8)
                     
                     await self._add_log(db, task_id, "success", f"抢票成功！订单号: {order_id}")
+                    passenger_names = ", ".join(extra_data.get("passenger_names", [])) if extra_data else ""
+                    self._send_notification(
+                        "12306 助手：抢票成功",
+                        (
+                            f"{self._task_summary(task)}\n"
+                            f"订单号: {order_id}\n"
+                            f"车次: {extra_data.get('train_code', '') if extra_data else ''}\n"
+                            f"时间: {extra_data.get('start_time', '') if extra_data else ''}"
+                            f" - {extra_data.get('arrive_time', '') if extra_data else ''}\n"
+                            f"席别: {extra_data.get('seat_name', '') if extra_data else ''}\n"
+                            f"乘车人: {passenger_names}\n"
+                            "请尽快前往 12306 支付。"
+                        ),
+                    )
                     await self.stop_task(task_id)
                 else:
                     await self._add_log(db, task_id, "info", message)
@@ -224,12 +290,20 @@ class TicketScheduler:
                         task.result_message = message
                         task.finished_at = datetime.utcnow() + timedelta(hours=8)
                         await self._add_log(db, task_id, "error", f"任务停止: {message}")
+                        self._send_notification(
+                            "12306 助手：抢票异常",
+                            f"{self._task_summary(task)}\n原因: {message}",
+                        )
                         await self.stop_task(task_id)
                 
                 await db.commit()
                 
             except Exception as e:
                 await self._add_log(db, task_id, "error", f"执行异常: {str(e)}")
+                self._send_notification(
+                    "12306 助手：任务执行异常",
+                    f"{self._task_summary(task)}\n异常: {str(e)}",
+                )
                 await db.commit()
     
     async def _query_and_order(
@@ -237,7 +311,7 @@ class TicketScheduler:
         task: Task,
         cookies: Dict,
         db: AsyncSession
-    ) -> tuple[bool, str, str]:
+    ) -> tuple[bool, str, str, Optional[Dict]]:
         """查票并下单"""
         query_service = QueryService(cookies)
         
@@ -265,10 +339,10 @@ class TicketScheduler:
             )
             
             if error:
-                return False, "", f"查票失败: {error}"
+                return False, "", f"查票失败: {error}", None
             
             if not trains:
-                return False, "", "未查询到任何车次"
+                return False, "", "未查询到任何车次", None
             
             # 过滤指定车次
             if task.train_codes:
@@ -276,7 +350,7 @@ class TicketScheduler:
                 trains = [t for t in trains if t.train_code in target_codes]
                 
                 if not trains:
-                    return False, "", "指定车次不存在或已停运"
+                    return False, "", "指定车次不存在或已停运", None
             
             # 获取席别优先级
             seat_types = task.seat_types.split(",") if task.seat_types else ["O"]
@@ -288,7 +362,7 @@ class TicketScheduler:
             for train in trains:
                 # 检查任务是否还在运行列表
                 if task.id not in self._active_tasks:
-                   return False, "", "任务已暂停或停止"
+                   return False, "", "任务已暂停或停止", None
 
                 # 收集该车次的席位状态
                 seat_status_list = []
@@ -383,7 +457,14 @@ class TicketScheduler:
                                 )
                                 
                                 if result.success:
-                                    return True, result.order_id, f"购票成功！"
+                                    extra_data = {
+                                        "train_code": train.train_code,
+                                        "start_time": train.start_time,
+                                        "arrive_time": train.arrive_time,
+                                        "seat_name": seat_name,
+                                        "passenger_names": [p.passenger_name for p in matched_passengers],
+                                    }
+                                    return True, result.order_id, f"购票成功！", extra_data
                                 else:
                                     await self._add_log(
                                         db, task.id, "warning",
@@ -397,14 +478,14 @@ class TicketScheduler:
                             msg = f"发现余票: {train.train_code} {seat_name}({seat_count})"
                             # 如果还没记录过这个车次的发现日志，记一下（防止scan_details里重复强调）
                             # 这里直接返回，外部会记录
-                            return False, "", f"{msg}, 等待手动下单"
+                            return False, "", f"{msg}, 等待手动下单", None
                 
                 # 记录该车次状态
                 scan_details.append(f"{train.train_code}[{', '.join(seat_status_list)}]")
 
             # 如果没有成功下单，或者没有 auto_submit，返回扫描详情
             details_str = " | ".join(scan_details)
-            return False, "", f"扫描结束: {details_str}"
+            return False, "", f"扫描结束: {details_str}", None
             
         finally:
             await query_service.close()

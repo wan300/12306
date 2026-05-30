@@ -47,10 +47,23 @@ class LoginStatusResponse(BaseModel):
     expire_time: Optional[datetime] = None
 
 
+class AuthSessionResponse(BaseModel):
+    """认证会话信息"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
 class QRCodeResponse(BaseModel):
     """二维码响应"""
     uuid: str
     image_base64: str  # Base64 编码的图片
+
+
+class LoginQRCodeResponse(QRCodeResponse):
+    """扫码登录挑战二维码响应"""
+    challenge_id: str
 
 
 class QRCodeStatusResponse(BaseModel):
@@ -58,3 +71,4 @@ class QRCodeStatusResponse(BaseModel):
     status: int  # 0-等待, 1-已扫码, 2-确认登录, 3-过期
     message: str
     is_success: bool = False
+    auth: Optional[AuthSessionResponse] = None

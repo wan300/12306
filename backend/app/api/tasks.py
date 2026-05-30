@@ -9,8 +9,9 @@ from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, func
 
+from ..core.auth import get_current_user
 from ..core.database import get_db
 from ..models.user import User
 from ..models.task import Task, TaskLog, TaskStatus
@@ -24,29 +25,40 @@ from ..tasks.scheduler import get_scheduler
 router = APIRouter(prefix="/tasks", tags=["任务"])
 
 
+async def _get_owned_task(
+    task_id: int,
+    current_user_id: int,
+    db: AsyncSession,
+) -> Task:
+    """按任务 ID 查询并校验任务归属。"""
+    stmt = select(Task).where(Task.id == task_id)
+    result = await db.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    if task.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+
+    return task
+
+
 # ==================== 任务 CRUD ====================
 
 @router.post("", response_model=ResponseBase[TaskResponse])
 async def create_task(
     task_data: TaskCreate,
-    user_id: int = Query(..., description="用户 ID"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """创建抢票任务"""
-    # 检查用户是否存在且已登录
-    stmt = select(User).where(User.id == user_id)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    
-    if not user.is_logged_in:
+    if not current_user.is_logged_in:
         raise HTTPException(status_code=400, detail="用户未登录，请先登录 12306")
     
     # 创建任务
     task = Task(
-        user_id=user_id,
+        user_id=current_user.id,
         name=task_data.name,
         from_station=task_data.from_station,
         to_station=task_data.to_station,
@@ -84,17 +96,14 @@ async def create_task(
 
 @router.get("", response_model=TaskListResponse)
 async def list_tasks(
-    user_id: Optional[int] = Query(None, description="用户 ID（可选）"),
     status: Optional[TaskStatusEnum] = Query(None, description="任务状态筛选"),
     skip: int = Query(0, ge=0, description="跳过条数"),
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取任务列表"""
-    stmt = select(Task)
-    
-    if user_id:
-        stmt = stmt.where(Task.user_id == user_id)
+    stmt = select(Task).where(Task.user_id == current_user.id)
     
     if status:
         stmt = stmt.where(Task.status == TaskStatus(status.value))
@@ -105,14 +114,12 @@ async def list_tasks(
     tasks = result.scalars().all()
     
     # 获取总数
-    count_stmt = select(Task)
-    if user_id:
-        count_stmt = count_stmt.where(Task.user_id == user_id)
+    count_stmt = select(func.count()).select_from(Task).where(Task.user_id == current_user.id)
     if status:
         count_stmt = count_stmt.where(Task.status == TaskStatus(status.value))
-    
+
     count_result = await db.execute(count_stmt)
-    total = len(count_result.scalars().all())
+    total = count_result.scalar_one()
     
     return TaskListResponse(
         total=total,
@@ -121,14 +128,13 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=ResponseBase[TaskResponse])
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def get_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """获取任务详情"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     return ResponseBase(
         success=True,
@@ -140,15 +146,11 @@ async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
 async def update_task(
     task_id: int,
     task_data: TaskUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """更新任务"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="运行中的任务无法修改")
@@ -181,14 +183,13 @@ async def update_task(
 
 
 @router.delete("/{task_id}", response_model=ResponseBase)
-async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """删除任务"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="运行中的任务无法删除，请先停止")
@@ -202,14 +203,13 @@ async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
 # ==================== 任务控制 ====================
 
 @router.post("/{task_id}/start", response_model=ResponseBase)
-async def start_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def start_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """启动任务"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     if task.status == TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="任务已在运行中")
@@ -240,14 +240,13 @@ async def start_task(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{task_id}/stop", response_model=ResponseBase)
-async def stop_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def stop_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """停止任务"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     if task.status != TaskStatus.RUNNING:
         raise HTTPException(status_code=400, detail="任务未在运行中")
@@ -273,14 +272,13 @@ async def stop_task(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{task_id}/cancel", response_model=ResponseBase)
-async def cancel_task(task_id: int, db: AsyncSession = Depends(get_db)):
+async def cancel_task(
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """取消任务"""
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     if task.status == TaskStatus.SUCCESS:
         raise HTTPException(status_code=400, detail="已成功的任务无法取消")
@@ -314,19 +312,14 @@ async def get_task_logs(
     level: Optional[str] = Query(None, description="日志级别筛选"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """获取任务日志"""
-    # 检查任务是否存在
-    stmt = select(Task).where(Task.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await _get_owned_task(task_id, current_user.id, db)
     
     # 查询日志
-    stmt = select(TaskLog).where(TaskLog.task_id == task_id)
+    stmt = select(TaskLog).where(TaskLog.task_id == task.id)
     
     if level:
         stmt = stmt.where(TaskLog.level == level)

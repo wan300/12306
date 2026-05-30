@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import get_settings, ensure_directories
 from app.core.database import init_db, close_db
-from app.api import auth, trains, tasks, users, logs
+from app.api import auth, trains, tasks, users, logs, config
 from app.core.terminal_logs import (
     bind_terminal_log_loop,
     install_terminal_capture,
@@ -130,6 +130,7 @@ app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 app.include_router(trains.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tasks.router, prefix=settings.API_V1_PREFIX)
 app.include_router(logs.router, prefix=settings.API_V1_PREFIX)
+app.include_router(config.router, prefix=settings.API_V1_PREFIX)
 
 
 # 根路由

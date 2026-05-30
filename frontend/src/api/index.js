@@ -1,5 +1,21 @@
 import axios from 'axios'
 
+const ACCESS_TOKEN_KEY = 'accessToken'
+
+const getStoredAccessToken = () => {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem(ACCESS_TOKEN_KEY) || ''
+}
+
+const setStoredAccessToken = (token) => {
+  if (typeof window === 'undefined') return
+  if (token) {
+    localStorage.setItem(ACCESS_TOKEN_KEY, token)
+  } else {
+    localStorage.removeItem(ACCESS_TOKEN_KEY)
+  }
+}
+
 // 根据环境确定API基础URL
 // 开发模式使用Vite代理，生产模式直接访问后端
 const getBaseURL = () => {
@@ -22,13 +38,17 @@ const normalizeWsBase = (url) => {
 }
 
 const getTerminalLogsWsUrl = () => {
+  const token = getStoredAccessToken()
+
   if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
     const backendUrl = window.electronAPI.getBackendUrl?.() || 'http://127.0.0.1:8000/api/v1'
-    return `${normalizeWsBase(backendUrl)}/logs/ws/terminal`
+    const wsUrl = `${normalizeWsBase(backendUrl)}/logs/ws/terminal`
+    return token ? `${wsUrl}?token=${encodeURIComponent(token)}` : wsUrl
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/api/v1/logs/ws/terminal`
+  const wsUrl = `${protocol}//${window.location.host}/api/v1/logs/ws/terminal`
+  return token ? `${wsUrl}?token=${encodeURIComponent(token)}` : wsUrl
 }
 
 const request = axios.create({
@@ -36,10 +56,31 @@ const request = axios.create({
   timeout: 60000  // 增加到60秒，给后端更多处理时间
 })
 
+// 请求拦截器：自动注入访问令牌
+request.interceptors.request.use((config) => {
+  const token = getStoredAccessToken()
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 // 响应拦截器
 request.interceptors.response.use(
   response => response.data,
   error => {
+    if (error.response?.status === 401) {
+      setStoredAccessToken('')
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('currentUserId')
+        localStorage.removeItem('currentUser')
+        if (window.location.hash !== '#/login') {
+          window.location.hash = '#/login'
+        }
+      }
+    }
+
     const message = error.response?.data?.detail || error.message || '请求失败'
     console.error('API Error:', message)
     return Promise.reject(new Error(message))
@@ -47,41 +88,38 @@ request.interceptors.response.use(
 )
 
 export default {
+  setAccessToken(token) {
+    setStoredAccessToken(token)
+  },
+
+  clearAccessToken() {
+    setStoredAccessToken('')
+  },
+
+  getAccessToken() {
+    return getStoredAccessToken()
+  },
+
   // ========== 用户相关 ==========
-  createUser(data) {
-    return request.post('/auth/users', data)
+
+  getCurrentUser() {
+    return request.get('/auth/me')
+  },
+
+  createLoginQRCode() {
+    return request.post('/auth/login/qrcode')
+  },
+
+  checkLoginQRCodeStatus(challengeId) {
+    return request.get(`/auth/login/qrcode/${challengeId}/status`)
   },
   
-  getUsers() {
-    return request.get('/auth/users')
+  logout() {
+    return request.post('/auth/logout')
   },
   
-  getUser(userId) {
-    return request.get(`/auth/users/${userId}`)
-  },
-  
-  checkLoginStatus(userId) {
-    return request.get(`/auth/status/${userId}`)
-  },
-  
-  getQRCode(userId) {
-    return request.post(`/auth/qrcode/${userId}`)
-  },
-  
-  checkQRStatus(userId, uuid) {
-    return request.get(`/auth/qrcode/${userId}/status`, { params: { uuid } })
-  },
-  
-  logout(userId) {
-    return request.post(`/auth/logout/${userId}`)
-  },
-  
-  deleteUser(userId) {
-    return request.delete(`/auth/users/${userId}`)
-  },
-  
-  getPassengers(userId) {
-    return request.get(`/users/${userId}/passengers`)
+  getPassengers() {
+    return request.get('/users/me/passengers')
   },
   
   // ========== 查票相关 ==========
@@ -102,8 +140,8 @@ export default {
     return request.get(`/tasks/${taskId}`)
   },
   
-  createTask(data, userId) {
-    return request.post('/tasks', data, { params: { user_id: userId } })
+  createTask(data) {
+    return request.post('/tasks', data)
   },
   
   updateTask(taskId, data) {
@@ -128,6 +166,19 @@ export default {
   
   getTaskLogs(taskId, params) {
     return request.get(`/tasks/${taskId}/logs`, { params })
+  },
+
+  // ========== 通知配置 ==========
+  getNotificationConfig() {
+    return request.get('/config/notification')
+  },
+
+  updateNotificationConfig(data) {
+    return request.post('/config/notification', data)
+  },
+
+  testNotification(data) {
+    return request.post('/config/notification/test', data)
   },
 
   getTerminalLogsWsUrl

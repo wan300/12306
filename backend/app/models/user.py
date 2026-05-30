@@ -24,7 +24,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     
     # 12306 登录相关
-    railway_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    railway_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)
     
     # Session 数据（JSON 格式存储 cookies 等）
     session_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

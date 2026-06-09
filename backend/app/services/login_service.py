@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from ..core.config import get_settings
+from ..utils.sm4 import sm4_encrypt_ecb_base64
 
 settings = get_settings()
 
@@ -76,11 +77,16 @@ class LoginService:
     
     QR_CREATE_URL = f"{PASSPORT_URL}/web/create-qr64"
     QR_CHECK_URL = f"{PASSPORT_URL}/web/checkqr"
+    PASSWORD_CHECK_URL = f"{PASSPORT_URL}/web/checkLoginVerify"
+    PASSWORD_LOGIN_URL = f"{PASSPORT_URL}/web/login"
+    SLIDE_PASSCODE_URL = f"{PASSPORT_URL}/web/slide-passcode"
+    SMS_CODE_URL = f"{PASSPORT_URL}/web/getMessageCode"
     UAMTK_URL = f"{PASSPORT_URL}/web/auth/uamtk"
     UAMAUTHCLIENT_URL = f"{BASE_URL}/otn/uamauthclient"
     USER_INFO_URL = f"{BASE_URL}/otn/index/initMy12306Api"
     
     APP_ID = "otn"
+    SM4_KEY = "tiekeyuankp12306"
     
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -180,6 +186,38 @@ class LoginService:
         session_file = self._get_session_file()
         if session_file.exists():
             session_file.unlink()
+
+    @staticmethod
+    def _response_json(response: httpx.Response) -> Dict[str, Any]:
+        """Parse plain JSON or a simple JSONP callback response."""
+        text = response.text.strip()
+        if text and "(" in text and text.endswith(")"):
+            start = text.find("(")
+            text = text[start + 1:-1]
+            return json.loads(text)
+        return response.json()
+
+    @staticmethod
+    def _result_code(payload: Dict[str, Any], key: str = "result_code") -> str:
+        value = payload.get(key)
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _result_message(payload: Dict[str, Any], fallback: str = "12306 请求失败") -> str:
+        messages = payload.get("messages")
+        if isinstance(messages, list) and messages:
+            return str(messages[0])
+        if messages:
+            return str(messages)
+        return str(payload.get("result_message") or payload.get("message") or fallback)
+
+    def _ensure_device_fingerprint_cookie(self) -> None:
+        if "RAIL_DEVICEID" not in self.session.cookies or "RAIL_EXPIRATION" not in self.session.cookies:
+            synthetic = self._generate_synthetic_device_fingerprint()
+            self.session.cookies.update(synthetic)
+            self._save_session()
+        if self._client and not self._client.is_closed:
+            self._client.cookies.update(self.session.cookies)
     
     # ==================== 设备指纹 ====================
     
@@ -360,6 +398,239 @@ class LoginService:
             
         except Exception:
             return QRCodeStatus.ERROR, None
+
+    # ==================== 账号密码登录 ====================
+
+    async def check_password_login(self, username: str) -> Dict[str, Any]:
+        """Check which verification mode 12306 requires before password login."""
+        self._ensure_device_fingerprint_cookie()
+        client = await self.get_client()
+        response = await client.post(
+            self.PASSWORD_CHECK_URL,
+            data={"username": username.strip(), "appid": self.APP_ID},
+        )
+        return self._response_json(response)
+
+    async def get_slide_passcode(self, username: str) -> Dict[str, Any]:
+        """Request a noCaptcha token for the embedded slide verification widget."""
+        self._ensure_device_fingerprint_cookie()
+        client = await self.get_client()
+        response = await client.post(
+            self.SLIDE_PASSCODE_URL,
+            data={"slideMode": "1", "appid": self.APP_ID, "username": username.strip()},
+        )
+        payload = self._response_json(response)
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        token = payload.get("if_check_slide_passcode_token") or data.get("if_check_slide_passcode_token") or ""
+        payload["slide_token"] = token
+        return payload
+
+    async def send_password_sms_code(self, username: str, cast_num: str) -> Dict[str, Any]:
+        """Send the pre-login SMS verification code."""
+        client = await self.get_client()
+        response = await client.post(
+            self.SMS_CODE_URL,
+            data={"appid": self.APP_ID, "username": username.strip(), "castNum": cast_num.strip()},
+        )
+        return self._response_json(response)
+
+    async def request_uamtk(self) -> Dict[str, Any]:
+        client = await self.get_client()
+        response = await client.post(self.UAMTK_URL, data={"appid": self.APP_ID})
+        return self._response_json(response)
+
+    async def complete_authentication(self, uamtk_payload: Optional[Dict[str, Any]] = None) -> Tuple[bool, Dict[str, Any]]:
+        """Finish 12306 unified auth and persist session cookies."""
+        client = await self.get_client()
+        payload = uamtk_payload if uamtk_payload is not None else await self.request_uamtk()
+        if self._result_code(payload) != "0":
+            return False, payload
+
+        new_apptk = payload.get("newapptk") or payload.get("apptk")
+        if not new_apptk:
+            return False, {"result_message": "12306 未返回认证令牌", "response": payload}
+
+        self.session.uamtk = new_apptk
+
+        response = await client.post(self.UAMAUTHCLIENT_URL, data={"tk": new_apptk})
+        result = self._response_json(response)
+        if self._result_code(result) != "0":
+            return False, result
+
+        self.session.apptk = result.get("apptk", "")
+        self.session.username = result.get("username", "")
+        self.session.is_logged_in = True
+        self.session.login_time = datetime.now()
+
+        for cookie in client.cookies.jar:
+            self.session.cookies[cookie.name] = cookie.value
+
+        if "RAIL_DEVICEID" not in self.session.cookies:
+            synthetic = self._generate_synthetic_device_fingerprint()
+            self.session.cookies.update(synthetic)
+
+        self._save_session()
+        return True, result
+
+    def _manual_auth_result(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        code = self._result_code(payload)
+        mobile = str(payload.get("mobile") or "")
+        messages = {
+            "91": f"请用尾号{mobile}手机号发送短信 666 到 12306 后重试，或切换扫码登录。",
+            "92": f"12306 要求手机号{mobile}下行短信核验，请切换扫码登录。",
+            "94": "12306 要求线下身份核验，当前应用内无法完成。",
+            "95": "12306 要求在官方 App 内完成登录核验，请切换扫码登录。",
+            "97": "12306 要求额外登录控制验证，请切换扫码登录。",
+        }
+        return {
+            "status": "manual_required",
+            "result_code": code,
+            "message": messages.get(code, self._result_message(payload, "12306 要求额外人工验证")),
+            "raw": payload,
+        }
+
+    async def begin_password_login(self, username: str, password: str) -> Dict[str, Any]:
+        """Start password login, returning success or the required verification mode."""
+        username = username.strip()
+        if not username or not password:
+            return {"status": "error", "message": "请输入用户名和密码"}
+
+        check_payload = await self.check_password_login(username)
+        check_code = self._result_code(check_payload, "login_check_code")
+
+        if check_code == "0":
+            return await self.submit_password_login(username, password)
+
+        if check_code in {"1", "2"}:
+            slide_payload = await self.get_slide_passcode(username)
+            slide_token = str(slide_payload.get("slide_token") or "")
+            available = []
+            if slide_token:
+                available.append("slide")
+            if check_code == "1":
+                available.append("sms")
+            if not available:
+                return {
+                    "status": "error",
+                    "message": self._result_message(slide_payload, "12306 未返回可用验证方式"),
+                    "raw": {"check": check_payload, "slide": slide_payload},
+                }
+            return {
+                "status": "needs_verification",
+                "verification_type": "choice" if len(available) > 1 else available[0],
+                "available_verifications": available,
+                "slide_token": slide_token,
+                "login_check_code": check_code,
+                "message": "请完成 12306 登录验证",
+                "raw": {"check": check_payload, "slide": slide_payload},
+            }
+
+        if check_code == "3":
+            return {
+                "status": "needs_verification",
+                "verification_type": "sms",
+                "available_verifications": ["sms"],
+                "login_check_code": check_code,
+                "message": "请输入证件号后 4 位并获取短信验证码",
+                "raw": {"check": check_payload},
+            }
+
+        return {
+            "status": "error",
+            "message": self._result_message(check_payload, "12306 登录前校验失败"),
+            "raw": {"check": check_payload},
+        }
+
+    async def submit_password_login(
+        self,
+        username: str,
+        password: str,
+        verification: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Submit username/password with optional SMS or slide verification data."""
+        self._ensure_device_fingerprint_cookie()
+        client = await self.get_client()
+        verification = verification or {}
+        verification_type = str(verification.get("type") or verification.get("verification_type") or "")
+
+        form_data: Dict[str, Any] = {
+            "sessionId": "",
+            "sig": "",
+            "if_check_slide_passcode_token": "",
+            "scene": "",
+            "checkMode": "",
+            "randCode": "",
+            "username": username.strip(),
+            "password": "@" + sm4_encrypt_ecb_base64(password, self.SM4_KEY),
+            "appid": self.APP_ID,
+        }
+
+        if verification_type == "slide":
+            form_data.update(
+                {
+                    "sessionId": verification.get("sessionId") or verification.get("session_id") or "",
+                    "sig": verification.get("sig") or "",
+                    "if_check_slide_passcode_token": (
+                        verification.get("if_check_slide_passcode_token")
+                        or verification.get("token")
+                        or ""
+                    ),
+                    "scene": verification.get("scene") or "nc_login",
+                    "checkMode": "1",
+                }
+            )
+        elif verification_type == "sms":
+            form_data.update(
+                {
+                    "checkMode": "0",
+                    "randCode": verification.get("randCode") or verification.get("sms_code") or "",
+                }
+            )
+
+        response = await client.post(
+            self.PASSWORD_LOGIN_URL,
+            data=form_data,
+            headers={"isPasswordCopy": "N", "appFlag": ""},
+        )
+        payload = self._response_json(response)
+        code = self._result_code(payload)
+
+        if code == "0":
+            auth_success, auth_payload = await self.complete_authentication()
+            if auth_success:
+                return {
+                    "status": "success",
+                    "message": f"登录成功，用户 {self.session.username or username}",
+                    "username": self.session.username or username,
+                    "raw": {"login": payload, "auth": auth_payload},
+                }
+            auth_code = self._result_code(auth_payload)
+            if auth_code in {"91", "92", "94", "95", "97"}:
+                return self._manual_auth_result(auth_payload)
+            return {
+                "status": "error",
+                "message": self._result_message(auth_payload, "12306 认证失败"),
+                "raw": {"login": payload, "auth": auth_payload},
+            }
+
+        if code in {"91", "92", "94", "95", "97"}:
+            auth_payload = await self.request_uamtk()
+            return self._manual_auth_result(auth_payload)
+
+        if code == "101":
+            return {
+                "status": "error",
+                "result_code": code,
+                "message": "您的密码很久没有修改了，请先到 12306 官方渠道重新设置密码。",
+                "raw": payload,
+            }
+
+        return {
+            "status": "error",
+            "result_code": code,
+            "message": self._result_message(payload, "12306 账号密码登录失败"),
+            "raw": payload,
+        }
     
     async def poll_qr_status(
         self,
@@ -399,49 +670,9 @@ class LoginService:
     
     async def authenticate(self) -> bool:
         """完成登录认证流程"""
-        client = await self.get_client()
-        
         try:
-            # 获取 uamtk
-            response = await client.post(self.UAMTK_URL, data={"appid": self.APP_ID})
-            result = response.json()
-            
-            if result.get("result_code") != 0:
-                return False
-            
-            new_apptk = result.get("newapptk")
-            if not new_apptk:
-                return False
-            
-            self.session.uamtk = new_apptk
-            
-            # 获取 apptk
-            response = await client.post(self.UAMAUTHCLIENT_URL, data={"tk": new_apptk})
-            result = response.json()
-            
-            if result.get("result_code") != 0:
-                return False
-            
-            self.session.apptk = result.get("apptk", "")
-            self.session.username = result.get("username", "")
-            self.session.is_logged_in = True
-            self.session.login_time = datetime.now()
-            
-            # 更新 cookies
-            for cookie in client.cookies.jar:
-                self.session.cookies[cookie.name] = cookie.value
-            
-            # 关键：检查认证后的 cookies 中是否包含 RAIL_DEVICEID
-            # 如果认证过程中丢失了，重新补上
-            if "RAIL_DEVICEID" not in self.session.cookies:
-                 print("[Warning] RAIL_DEVICEID lost during auth! Injecting synthetic one.")
-                 synthetic = self._generate_synthetic_device_fingerprint()
-                 self.session.cookies.update(synthetic)
-
-            self._save_session()
-            
-            return True
-            
+            success, _ = await self.complete_authentication()
+            return success
         except Exception:
             return False
     

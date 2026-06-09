@@ -53,7 +53,22 @@ backend/data/sessions/
 *.sqlite3
 backend/data/*.db
 
+# Android build and local signing
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/local.properties
+android/release-signing.properties
+android/app/build/
+android/app/release/
+android/app/*.apk
+android/app/*.aab
+android/app/keystore/
+android/sdk/
+
 # Temporary Test Files
 v1_test/session.json
 v1_test/__pycache__/
 _archive/
+.codex-remote-attachments/
+origin_12306_src/

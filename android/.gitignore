@@ -1,0 +1,9 @@
+.gradle/
+local.properties
+release-signing.properties
+app/build/
+app/release/
+app/*.apk
+app/*.aab
+app/keystore/
+sdk/

@@ -10,8 +10,21 @@ import os
 import sys
 from pathlib import Path
 from functools import lru_cache
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+try:
+    from pydantic import field_validator
+    from pydantic_settings import BaseSettings
+except ImportError:
+    class BaseSettings:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    def field_validator(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
 
 # 获取数据目录的绝对路径
@@ -21,6 +34,10 @@ def get_data_dir() -> Path:
     - 开发环境：使用当前目录的 data 文件夹
     - 打包后：使用可执行文件同级的 data 文件夹
     """
+    android_data_dir = os.environ.get("ANDROID_DATA_DIR")
+    if android_data_dir:
+        return Path(android_data_dir)
+
     if getattr(sys, 'frozen', False):
         # 打包后的环境
         base_path = Path(sys.executable).parent
@@ -95,6 +112,17 @@ class Settings(BaseSettings):
 
     # 安全开关：默认关闭全局终端日志流，避免多用户环境下的信息泄露
     ENABLE_TERMINAL_LOG_STREAM: bool = False
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_env(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+                return False
+        return value
     
     class Config:
         env_file = ".env"

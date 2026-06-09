@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="12306.db" />
+        <exclude domain="file" path="sessions/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="12306.db" />
+        <exclude domain="file" path="sessions/" />
+    </device-transfer>
+</data-extraction-rules>

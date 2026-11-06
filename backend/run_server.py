@@ -1,6 +1,12 @@
 import uvicorn
 import os
 import sys
+from app.core.http_environment import normalize_proxy_exclusions
+
+normalize_proxy_exclusions()
+for stream in (sys.stdout, sys.stderr):
+    if stream and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8")
 
 # Ensure the current directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

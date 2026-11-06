@@ -1,0 +1,38 @@
+const test = require('node:test')
+const assert = require('node:assert/strict')
+
+test('desktop API payloads serialize nested reactive subscription settings', async () => {
+  const { reactive } = await import('vue')
+  const { desktopPayload } = await import('../../src/api/desktopPayload.js')
+  const settings = reactive({ ENABLE_WEBHOOK: true, ticket_events: { flight: ['budget_met'], rail: [] } })
+  assert.throws(() => structuredClone({ ...settings }))
+  const result = structuredClone(desktopPayload({ ...settings }))
+  assert.deepEqual(result.ticket_events, { flight: ['budget_met'], rail: [] })
+  assert.equal(desktopPayload(undefined), undefined)
+})
+
+test('rail and flight task IDs cannot collide and their actions use original states', async () => {
+  const { normalizeTask } = await import('../../src/utils/ticket-task.js')
+  const rail = normalizeTask('rail', { id: 1, status: 'running', updated_at: '2026-11-05T18:00:00' })
+  const flight = normalizeTask('flight', { id: 1, status: 'pending_payment', config: { provider: 'ctrip' }, updated_at: '2026-11-05T10:00:00Z' })
+  assert.notEqual(rail.key, flight.key)
+  assert.equal(rail.timestamp, flight.timestamp)
+  assert.equal(rail.actions.pause, true)
+  assert.equal(flight.actions.start, false)
+  assert.equal(flight.actions.edit, false)
+  assert.equal(flight.actions.remove, false)
+  assert.equal(flight.statusLabel, '订单待支付')
+  assert.equal(rail.detailPath, '/task/rail/1')
+  assert.equal(flight.detailPath, '/task/flight/1')
+})
+
+test('budget readiness is distinct from an order and active flight phases remain pausable', async () => {
+  const { normalizeTask } = await import('../../src/utils/ticket-task.js')
+  const ready = normalizeTask('flight', { id: 2, status: 'ready', config: {} })
+  const checking = normalizeTask('flight', { id: 3, status: 'preparing', config: {} })
+  assert.equal(ready.statusLabel, '预算达标')
+  assert.equal(ready.orderId, undefined)
+  assert.equal(checking.status, 'running')
+  assert.equal(checking.actions.pause, true)
+  assert.equal(checking.actions.edit, false)
+})

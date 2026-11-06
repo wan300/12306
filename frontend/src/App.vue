@@ -38,7 +38,7 @@
                   <el-icon><HomeFilled /></el-icon>
                   <template #title>首页</template>
                 </el-menu-item>
-                <el-menu-item v-if="!userStore.isLoggedIn" index="/login">
+                <el-menu-item index="/login">
                   <el-icon><User /></el-icon>
                   <template #title>扫码登录</template>
                 </el-menu-item>
@@ -52,37 +52,20 @@
                 </el-menu-item>
                 <el-menu-item index="/query">
                   <el-icon><Search /></el-icon>
-                  <template #title>车票查询</template>
+                  <template #title>票务查询</template>
                 </el-menu-item>
+
                 <el-menu-item index="/notification">
                   <el-icon><Bell /></el-icon>
                   <template #title>通知配置</template>
                 </el-menu-item>
               </el-menu>
 
-              <div
-                v-if="userStore.currentUser && userStore.isLoggedIn"
-                class="user-info-footer"
-              >
-                <el-dropdown placement="top" style="width: 100%;">
-                  <div class="user-dropdown-footer" :class="{ collapsed: isCollapse }">
-                    <el-avatar :size="32" class="user-avatar">
-                      {{ displayAccountInitial }}
-                    </el-avatar>
-                    <div v-if="!isCollapse" class="user-details">
-                      <span class="username-text">{{ displayAccountName }}</span>
-                    </div>
-                    <el-icon v-if="!isCollapse" class="dropdown-icon"><ArrowUp /></el-icon>
-                  </div>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item @click="handleLogout">
-                        <el-icon><SwitchButton /></el-icon>
-                        退出登录
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+              <div class="user-info-footer">
+                <el-button text @click="router.push('/login')"
+                  ><el-icon><User /></el-icon
+                  ><span v-if="!isCollapse">账号管理</span></el-button
+                >
               </div>
             </div>
           </el-aside>
@@ -97,82 +80,68 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { Bell, Expand, Fold } from '@element-plus/icons-vue'
-import { useUserStore } from './stores/user'
-import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { Bell, Expand, Fold } from "@element-plus/icons-vue";
+import { useUserStore } from "./stores/user";
+import zhCn from "element-plus/dist/locale/zh-cn.mjs";
 
-const route = useRoute()
-const router = useRouter()
-const userStore = useUserStore()
-const isCollapse = ref(false)
-const isMobile = ref(false)
+const route = useRoute();
+const router = useRouter();
+const userStore = useUserStore();
+const isCollapse = ref(false);
+const isMobile = ref(false);
 
 const asideWidth = computed(() => {
   if (isMobile.value) {
-    return isCollapse.value ? '0px' : '200px'
+    return isCollapse.value ? "0px" : "200px";
   }
-  return isCollapse.value ? '64px' : '200px'
-})
+  return isCollapse.value ? "64px" : "200px";
+});
 
-const collapseIcon = computed(() => (isCollapse.value ? Expand : Fold))
-
-const displayAccountName = computed(() => {
-  if (!userStore.currentUser) return ''
-  return userStore.currentUser.railway_username || userStore.currentUser.username || ''
-})
-
-const displayAccountInitial = computed(() => {
-  return displayAccountName.value ? displayAccountName.value[0] : 'U'
-})
+const collapseIcon = computed(() => (isCollapse.value ? Expand : Fold));
 
 const pageTitle = computed(() => {
-  const path = route.path
-  if (path === '/') return '首页'
-  if (path === '/login') return '扫码登录'
-  if (path === '/tasks') return '任务列表'
-  if (path === '/create-task') return '创建任务'
-  if (path === '/query') return '车票查询'
-  if (path === '/notification') return '通知配置'
-  if (path.startsWith('/task/')) return '任务详情'
-  if (path.startsWith('/edit-task/')) return '编辑任务'
-  return '12306 自动化抢票系统'
-})
+  const path = route.path;
+  if (path === "/") return "首页";
+  if (path === "/login") return "扫码登录";
+  if (path === "/tasks") return "任务列表";
+  if (path === "/create-task") return "创建任务";
+  if (path === "/query") return "票务查询";
+  if (path === "/notification") return "通知配置";
+  if (path.startsWith("/task/")) return "任务详情";
+  if (path.startsWith("/edit-task/")) return "编辑任务";
+  return "票务助手";
+});
 
 const toggleCollapse = () => {
-  isCollapse.value = !isCollapse.value
-}
+  isCollapse.value = !isCollapse.value;
+};
 
 const checkScreenSize = () => {
-  const mobile = window.innerWidth < 768
-  isMobile.value = mobile
-  isCollapse.value = mobile
-}
+  const mobile = window.innerWidth < 768;
+  isMobile.value = mobile;
+  isCollapse.value = mobile;
+};
 
 watch(
   () => route.path,
   () => {
     if (isMobile.value) {
-      isCollapse.value = true
+      isCollapse.value = true;
     }
-  }
-)
+  },
+);
 
 onMounted(async () => {
-  await userStore.restoreUser()
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-})
+  await userStore.restoreUser();
+  checkScreenSize();
+  window.addEventListener("resize", checkScreenSize);
+});
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkScreenSize)
-})
-
-const handleLogout = async () => {
-  await userStore.logout()
-  router.replace('/login')
-}
+  window.removeEventListener("resize", checkScreenSize);
+});
 </script>
 
 <style>
@@ -189,8 +158,9 @@ body,
 }
 
 body {
-  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  font-family:
+    "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
 }
 
 .app-container {

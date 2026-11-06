@@ -9,6 +9,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from enum import Enum as PyEnum
+from uuid import uuid4
 from sqlalchemy import String, Text, DateTime, Boolean, Integer, ForeignKey, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +41,7 @@ class Task(Base):
     
     # 任务名称
     name: Mapped[str] = mapped_column(String(200))
+    notification_run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, default=lambda: str(uuid4()))
     
     # 行程信息
     from_station: Mapped[str] = mapped_column(String(50))          # 出发站

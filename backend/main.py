@@ -8,6 +8,7 @@
 """
 
 import sys
+import os
 import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -21,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import get_settings, ensure_directories
 from app.core.database import init_db, close_db
-from app.api import auth, trains, tasks, users, logs, config
+from app.api import auth, trains, tasks, users, logs, config, flights
+from app.services.flight_service import flight_service
+from app.services.notification_service import notification_service
 from app.core.terminal_logs import (
     bind_terminal_log_loop,
     install_terminal_capture,
@@ -48,12 +51,14 @@ async def lifespan(app: FastAPI):
     
     # 初始化数据库
     await init_db()
+    await notification_service.start()
     
     # 启动调度器
     scheduler = get_scheduler()
     scheduler.start()
     # 恢复运行中的任务
     await scheduler.resume_tasks()
+    await flight_service.start()
     
     print("[启动] 服务启动成功!")
     print(f"[启动] API 文档: http://localhost:8000/docs")
@@ -67,6 +72,8 @@ async def lifespan(app: FastAPI):
 
         # 关闭调度器
         scheduler.shutdown()
+        await flight_service.shutdown()
+        await notification_service.shutdown()
 
         # 关闭数据库连接
         await close_db()
@@ -104,7 +111,7 @@ app = FastAPI(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=list(dict.fromkeys(settings.CORS_ORIGINS + ([os.environ["DESKTOP_UI_ORIGIN"]] if os.environ.get("DESKTOP_UI_ORIGIN") else []))),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -131,6 +138,7 @@ app.include_router(trains.router, prefix=settings.API_V1_PREFIX)
 app.include_router(tasks.router, prefix=settings.API_V1_PREFIX)
 app.include_router(logs.router, prefix=settings.API_V1_PREFIX)
 app.include_router(config.router, prefix=settings.API_V1_PREFIX)
+app.include_router(flights.router, prefix=settings.API_V1_PREFIX)
 
 
 # 根路由

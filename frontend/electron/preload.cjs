@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 判断是否在Electron环境中
   isElectron: true,
+  flights: {
+    request: (method, route, body) => ipcRenderer.invoke('flights-api', { method, route, body }),
+  },
+  workspace: {
+    request: (method, route, body) => ipcRenderer.invoke('workspace-api', { method, route, body }),
+  },
 
   // 后端 URL（优先同步获取，兜底使用异步 IPC）
   getBackendUrl: () => getBackendUrlSync(),

@@ -81,8 +81,16 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  window.addEventListener('rail-auth-expired', clearAuthSession)
+
   // 恢复上次选择的用户
-  async function restoreUser() {
+  let restorePromise
+  function restoreUser() {
+    if (!restorePromise) restorePromise = restoreSession()
+    return restorePromise
+  }
+
+  async function restoreSession() {
     if (initialized.value) return
     initialized.value = true
 

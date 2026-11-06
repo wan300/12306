@@ -34,7 +34,7 @@ def get_data_dir() -> Path:
     - 开发环境：使用当前目录的 data 文件夹
     - 打包后：使用可执行文件同级的 data 文件夹
     """
-    android_data_dir = os.environ.get("ANDROID_DATA_DIR")
+    android_data_dir = os.environ.get("APP_DATA_DIR") or os.environ.get("ANDROID_DATA_DIR")
     if android_data_dir:
         return Path(android_data_dir)
 
@@ -53,8 +53,8 @@ class Settings(BaseSettings):
     """应用配置"""
     
     # 应用信息
-    APP_NAME: str = "12306 自动化抢票系统"
-    APP_VERSION: str = "1.0.0"
+    APP_NAME: str = "票务助手"
+    APP_VERSION: str = "1.1.0"
     DEBUG: bool = True
     
     # API 配置

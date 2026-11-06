@@ -1111,7 +1111,7 @@ def custom_notify(title: str, content: str, config=None) -> None:
     if response.status_code == 200:
         print("自定义通知推送成功！")
     else:
-        print(f"自定义通知推送失败！{response.status_code} {response.text}")
+        raise RuntimeError(f"自定义通知推送失败，HTTP {response.status_code}")
 
 
 def one() -> str:
@@ -1255,14 +1255,22 @@ def send(title: str, content: str, ignore_default_config: bool = False, **kwargs
     content += "\n\n" + one() if hitokoto != "false" else ""
 
     notify_function = add_notify_function(effective_config)
+    if not notify_function:
+        raise ValueError("未配置可用的通知渠道")
     # partial objects have a 'func' attribute that points to the original function
     # and the original function has __name__
-    ts = [
-        threading.Thread(target=mode, args=(title, content), name=mode.func.__name__)
-        for mode in notify_function
-    ]
+    failures = []
+    def deliver(mode):
+        try:
+            if mode(title, content) is False:
+                failures.append("rejected")
+        except Exception:
+            failures.append("failed")
+    ts = [threading.Thread(target=deliver, args=(mode,), name=mode.func.__name__) for mode in notify_function]
     [t.start() for t in ts]
     [t.join() for t in ts]
+    if failures:
+        raise RuntimeError(f"{len(failures)} 个通知渠道发送失败")
 
 
 def main():

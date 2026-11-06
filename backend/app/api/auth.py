@@ -10,12 +10,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, WebSocket, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from ..core.database import get_db
-from ..core.auth import create_access_token, get_access_token_expires_in, get_current_user
+from ..core.auth import create_access_token, get_access_token_expires_in, get_current_user, decode_access_token
 from ..models.user import User
 from ..schemas.user import (
     UserResponse, LoginStatusResponse,
@@ -213,7 +213,7 @@ async def get_current_login_user(current_user: User = Depends(get_current_user))
 # ==================== 二维码登录 ====================
 
 @router.post("/login/qrcode", response_model=ResponseBase[LoginQRCodeResponse])
-async def create_login_qr_code():
+async def create_login_qr_code(request: Request):
     """创建扫码登录挑战并返回二维码。"""
     _cleanup_expired_challenges()
 
@@ -230,7 +230,14 @@ async def create_login_qr_code():
             "session_key": session_key,
             "uuid": uuid,
             "created_at": datetime.now(timezone.utc),
+            "previous_user_id": None,
         }
+        bearer = request.headers.get("authorization", "")
+        if bearer.startswith("Bearer "):
+            try:
+                _login_challenges[challenge_id]["previous_user_id"] = int(decode_access_token(bearer[7:])["sub"])
+            except (HTTPException, ValueError, KeyError):
+                pass
 
         return ResponseBase(
             success=True,
@@ -276,6 +283,16 @@ async def check_login_qr_status(
             auth_success = await login_service.authenticate()
             if auth_success:
                 railway_username = login_service.get_username()
+                from ..models.task import Task, TaskStatus
+                from ..tasks.scheduler import get_scheduler
+                account_ids = set((await db.scalars(select(User.id).where(User.railway_username == railway_username))).all())
+                if challenge.get("previous_user_id"):
+                    account_ids.add(challenge["previous_user_id"])
+                active = (await db.scalars(select(Task).where(Task.user_id.in_(account_ids), Task.status == TaskStatus.RUNNING))).all()
+                for task in active:
+                    task.status, task.result_message = TaskStatus.PAUSED, "账号已更新，请核对后重新启动任务"
+                    await get_scheduler().stop_task(task.id)
+                await db.commit()
                 user = await _upsert_user_by_railway_account(
                     railway_username=railway_username,
                     login_service=login_service,

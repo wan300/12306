@@ -12,7 +12,7 @@ import time
 import asyncio
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Callable
 from datetime import datetime
 import httpx
 
@@ -86,6 +86,7 @@ class OrderResult:
     message: str = ""
     wait_time: int = -1
     wait_count: int = 0
+    requires_review: bool = False
 
 
 class OrderService:
@@ -560,24 +561,24 @@ class OrderService:
                         return OrderResult(
                             success=True,
                             order_id=order_id,
-                            message="出票成功"
+                            message="订单已生成，待支付"
                         )
                     
-                    if wait_time == -1:
-                        error_msg = data.get("msg", "出票失败")
-                        return OrderResult(success=False, message=error_msg)
+                    if wait_time in (-1, -2, -3):
+                        error_msg = data.get("msg") or data.get("errorMsg") or "订单未生成，请核对乘车人票种和官方未完成订单"
+                        return OrderResult(success=False, message=error_msg, requires_review=wait_time == -1)
                     
                 else:
                     messages = result.get("messages", [])
                     if messages:
                         return OrderResult(success=False, message=messages[0])
                 
-            except Exception:
-                pass
+            except (ValueError, httpx.HTTPError):
+                return OrderResult(success=False, message="订单结果暂无法确认，请先核对官方未完成订单，避免重复提交", requires_review=True)
             
             await asyncio.sleep(1)
         
-        return OrderResult(success=False, message="等待超时")
+        return OrderResult(success=False, message="等待超时，请核对官方未完成订单后再继续", requires_review=True)
     
     # ==================== 完整购票流程 ====================
     
@@ -588,7 +589,8 @@ class OrderService:
         passengers: List[Passenger] = None,
         passenger_indices: List[int] = None,
         seat_type: str = "O",
-        choose_seats: str = ""
+        choose_seats: str = "",
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> OrderResult:
         """
         完整购票流程
@@ -603,11 +605,14 @@ class OrderService:
             choose_seats: 选座
         """
         # 1. 提交订单请求
+        progress = on_progress or (lambda message: None)
+        progress("正在提交车票预订请求")
         success, error = await self.submit_order_request(train_info, secret_str)
         if not success:
             return OrderResult(success=False, message=f"提交订单失败: {error}")
         
         # 2. 初始化订单页面
+        progress("正在初始化订单信息")
         success, error = await self.init_dc()
         if not success:
             return OrderResult(success=False, message=f"初始化订单失败: {error}")
@@ -627,19 +632,23 @@ class OrderService:
             return OrderResult(success=False, message="未选择乘车人")
         
         # 4. 校验订单
+        progress("正在核验乘车人、席别和票种")
         success, error = await self.check_order_info(passengers, seat_type)
         if not success:
             return OrderResult(success=False, message=f"订单校验失败: {error}")
         
         # 5. 获取排队信息
+        progress("正在查询订单排队情况")
         await self.get_queue_count(seat_type)
         
         # 6. 确认订单
+        progress("正在确认订单，请等待结果")
         success, error = await self.confirm_order(passengers, seat_type, choose_seats)
         if not success:
             return OrderResult(success=False, message=f"确认订单失败: {error}")
         
         # 7. 等待出票结果
+        progress("订单已进入结果查询，正在等待订单号")
         return await self.query_order_wait_time()
 
 

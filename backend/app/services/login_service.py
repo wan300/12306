@@ -502,13 +502,17 @@ class LoginService:
             return await self.submit_password_login(username, password)
 
         if check_code in {"1", "2"}:
-            slide_payload = await self.get_slide_passcode(username)
+            try:
+                slide_payload = await self.get_slide_passcode(username)
+            except Exception:
+                # SMS remains available when the optional slider cannot load.
+                if check_code != "1":
+                    raise
+                slide_payload = {}
             slide_token = str(slide_payload.get("slide_token") or "")
-            available = []
+            available = ["sms"] if check_code == "1" else []
             if slide_token:
                 available.append("slide")
-            if check_code == "1":
-                available.append("sms")
             if not available:
                 return {
                     "status": "error",
@@ -518,6 +522,7 @@ class LoginService:
             return {
                 "status": "needs_verification",
                 "verification_type": "choice" if len(available) > 1 else available[0],
+                "preferred_verification": available[0],
                 "available_verifications": available,
                 "slide_token": slide_token,
                 "login_check_code": check_code,

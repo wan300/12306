@@ -49,6 +49,31 @@ class PasswordLoginBranchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["verification_type"], "sms")
         self.assertEqual(result["available_verifications"], ["sms"])
 
+    async def test_sms_preferred_when_both_are_allowed(self):
+        service = object.__new__(LoginService)
+        service.check_password_login = AsyncMock(return_value={"login_check_code": "1"})
+        service.get_slide_passcode = AsyncMock(return_value={"slide_token": "token"})
+        service.submit_password_login = AsyncMock()
+        result = await service.begin_password_login("alice", "secret")
+        self.assertEqual(result["preferred_verification"], "sms")
+        self.assertEqual(result["available_verifications"], ["sms", "slide"])
+        service.submit_password_login.assert_not_awaited()
+
+    async def test_optional_slider_failure_keeps_sms_available(self):
+        service = object.__new__(LoginService)
+        service.check_password_login = AsyncMock(return_value={"login_check_code": "1"})
+        service.get_slide_passcode = AsyncMock(side_effect=TimeoutError())
+        result = await service.begin_password_login("alice", "secret")
+        self.assertEqual(result["available_verifications"], ["sms"])
+        self.assertEqual(result["verification_type"], "sms")
+
+    async def test_blank_password_never_becomes_passwordless_sms_login(self):
+        service = object.__new__(LoginService)
+        service.check_password_login = AsyncMock()
+        result = await service.begin_password_login("alice", "")
+        self.assertEqual(result["status"], "error")
+        service.check_password_login.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

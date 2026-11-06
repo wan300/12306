@@ -1,0 +1,124 @@
+[
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xhdpi\\hp_change_station_logo_normal.webp",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_hp_change_station_logo_normal.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "C8B86E18C56DDD8FC031CFAD908B2B2B545A2C0A988FF65B94FD850EEBE9A2B4"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xhdpi\\hp_change_station_circle_normal.webp",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_hp_change_station_circle_normal.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "E3363F9B77D759FDC07A7165A42F5592C1843CAF32CF34B41CCC386AF58C21D0"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\ticket_student_checked.webp",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_ticket_student_checked.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "C03CADB5D554ABD0DB2B85534A1A544EC7969D06CB3425A73AF6A47658226D71"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\ticket_student_unchecked.png",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_ticket_student_unchecked.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "2DC9EE2AD447768F7102D728A5930F24158B2C4FB9D9185F8C3646C13F7644AB"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_home_normal.webp",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_home_normal.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "2D0451025CD17CA1CA04099FBDA56383545CD58313471E829409BE9AE39248B4"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_home_pressed.webp",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_home_pressed.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "090B145E64E56104E778A6B9B2DC1B65271651FBD0EFEBD519FF355BF9A30BB1"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_order_normal.webp",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_order_normal.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "2372F9174BDE0D506B588DE56A813CCE858EED7BF41135DF70D7398CEA37CBF7"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_order_pressed.png",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_order_pressed.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "92907956D89A9267A82186F42FA7D6D6F94C3F1BDA629BBFAE215718C07219CB"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_mine_normal.webp",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_mine_normal.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "90897942A1D7BCDB179778008B093F06EEC647B5A9191B5DAF13E345ABDD261C"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-xxhdpi\\icon_mine_pressed.png",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_icon_mine_pressed.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "4EDB1A4F069EFD7A3D87BBE3B842220AC5F645C4CDF09B1495755FF6D18401E2"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\drawable-hdpi\\filter.webp",
+    "file": "android/app/src/main/res/drawable-hdpi/origin_ticket_filter.webp",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "E8AD853C4018CCE1BD397468A3E7466B2FE67AC8BEA0E7A836B30549088FD698"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\jiebao\\assets\\web\\60000001_5.9.0.75.amr\\60000001\\www\\css\\list.a58ec60.css",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_ticket_route_line.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "E89B3CB68FF343838051C83ACBC00D5D8B9AE3AD36556A9F3E6E1A3D9E133CC3",
+    "sourceSelector": ".train-root-view-wrap .train-station-info .train-num-time span"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\_cleanup_quarantine\\20260602_154646\\source_intermediate\\apktool\\res\\mipmap-xxhdpi\\ic_trip_train.png",
+    "file": "android/app/src/main/res/drawable-xxhdpi/origin_ticket_direct.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "CB734EDF18C6CB43AA518CD8566B9F6F5B3C90D461030C1CB0F5424A9ED1BA81"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\jiebao\\assets\\web\\60000001_5.9.0.75.amr\\60000001\\www\\css\\order.a58ec60.css",
+    "selector": ".passenger-list .delete-passenger",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_waitlist_delete.png",
+    "sourceVersion": "5.9.0.75 H5 bundle",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "2EB646C670E0CBFB95876BFB5560DC956B910A58FDE89B627D2FE01CDADC5446"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\jiebao\\assets\\web\\60000001_5.9.0.75.amr\\60000001\\www\\css\\order.a58ec60.css",
+    "selector": ".add-passenger-background-image",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_waitlist_add_passenger.png",
+    "sourceVersion": "5.9.0.75 H5 bundle",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "197CCC1BEDECA588BCE972CF52D58DC6FCF906094ACA2C4EE4CF711C8539F95D"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\assets\\web\\60000016_5.9.0.11.amr\\60000016\\www\\js\\robbingTicketUnpay.c3445a4.js#png-base64-index-18",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_waitlist_clock.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "B3280F07AA6A9B205882F7E401C04DA654ADA1FF9A05FD67BE844336F6C4E99F"
+  },
+  {
+    "source": "D:\\code\\project\\12306-解包\\assets\\web\\60000016_5.9.0.11.amr\\60000016\\www\\js\\robbingTicketUnpay.c3445a4.js#png-base64-index-0",
+    "file": "android/app/src/main/res/drawable-xhdpi/origin_waitlist_route.png",
+    "sourceVersion": "5.9.4.5",
+    "referenceVersion": "5.9.6.8",
+    "sha256": "923F3F67B75429854D6C16EBF9832D29B3B2ECB14253976029A385295D7D297A"
+  }
+]

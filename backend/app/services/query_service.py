@@ -11,11 +11,12 @@ import json
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 import httpx
 
 from ..core.config import get_settings
+from .ticket_prices import decode_price_segments, parse_price_response
 
 settings = get_settings()
 
@@ -64,6 +65,16 @@ class TrainInfo:
     is_support_card: bool = False
     remark: str = ""
     secret_str: str = ""
+    from_station_no: str = ""
+    to_station_no: str = ""
+    seat_types: str = ""
+    prices_fen: Dict[str, int] = field(default_factory=dict)
+    price_source: str = ""
+    waitlist_supported: bool = False
+    waitlist_restricted_seats: str = ""
+    preferred_first_seat: str = "--"
+    moving_sleeper: str = "--"
+    quiet_carriage: bool = False
     
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -276,7 +287,7 @@ class QueryService:
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             if date_obj < today:
                 return [], "出发日期不能早于今天"
-            if date_obj > today + timedelta(days=15):
+            if date_obj > today + timedelta(days=14):
                 return [], "出发日期不能超过15天"
         except ValueError:
             return [], f"日期格式错误: {train_date}"
@@ -396,10 +407,61 @@ class QueryService:
             soft_seat=get_seat(24) if len(parts) > 24 else "--",
             hard_seat=get_seat(29) if len(parts) > 29 else "--",
             no_seat=get_seat(26) if len(parts) > 26 else "--",
+            preferred_first_seat=get_seat(20),
+            moving_sleeper=get_seat(33),
+            first_sleeper=get_seat(23) if len(parts) > 35 and "I" in parts[35] else "--",
+            second_sleeper=get_seat(28) if len(parts) > 35 and "J" in parts[35] else "--",
             is_support_card=parts[18] == "1" if len(parts) > 18 else False,
             remark=parts[1] if len(parts) > 1 else "",
-            secret_str=secret_str
+            secret_str=secret_str,
+            from_station_no=parts[16],
+            to_station_no=parts[17],
+            seat_types=parts[35] if len(parts) > 35 else "",
+            prices_fen=decode_price_segments(parts[39] if len(parts) > 39 else ""),
+            price_source="leftTicket/yp_info_new" if len(parts) > 39 and decode_price_segments(parts[39]) else "",
+            waitlist_supported=(len(parts) > 37 and parts[37] == "1" and bool(secret_str) and secret_str != "null"),
+            waitlist_restricted_seats=parts[38] if len(parts) > 38 else "",
+            quiet_carriage=(len(parts) > 46 and len(parts[46].split("#")) > 2 and parts[46].split("#")[2].startswith("Q")),
         )
+
+    async def query_prices(self, train_no: str, from_station_no: str,
+                           to_station_no: str, seat_types: str, train_date: str) -> dict:
+        """Refresh one train/segment/date quote; never turn missing data into zero."""
+        fail = lambda code, message: {"success": False, "code": code, "message": message,
+                                      "data": {"prices_fen": {}}}
+        if not all(isinstance(v, str) for v in (train_no, from_station_no, to_station_no, seat_types, train_date)):
+            return fail("INVALID_PRICE_REQUEST", "车次信息不完整，请重新查询车票")
+        if not (re.fullmatch(r"[A-Za-z0-9]{6,32}", train_no or "")
+                and re.fullmatch(r"[0-9]{1,3}", from_station_no or "")
+                and re.fullmatch(r"[0-9]{1,3}", to_station_no or "")
+                and int(from_station_no) < int(to_station_no)
+                and re.fullmatch(r"[A-Za-z0-9]{1,32}", seat_types or "")
+                and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", train_date or "")):
+            return fail("INVALID_PRICE_REQUEST", "车次信息不完整，请重新查询车票")
+        try:
+            date = datetime.strptime(train_date, "%Y-%m-%d").date()
+            if not 0 <= (date - datetime.now().date()).days <= 14:
+                return fail("INVALID_PRICE_DATE", "出发日期不可用，请重新选择")
+        except ValueError:
+            return fail("INVALID_PRICE_DATE", "出发日期不可用，请重新选择")
+        try:
+            client = await self.get_client()
+            response = await client.get(f"{self.BASE_URL}/otn/leftTicket/queryTicketPrice", params={
+                "train_no": train_no, "from_station_no": from_station_no,
+                "to_station_no": to_station_no, "seat_types": seat_types, "train_date": train_date,
+            })
+            response.raise_for_status()
+            payload = response.json()
+            prices = parse_price_response(payload.get("data")) if payload.get("status") is True else {}
+            if not prices:
+                return fail("PRICE_UNAVAILABLE", "暂未获取到票价，请稍后重试")
+            return {"success": True, "code": "OK", "message": "", "data": {
+                "train_no": train_no, "from_station_no": from_station_no,
+                "to_station_no": to_station_no, "train_date": train_date,
+                "prices_fen": prices, "price_source": "leftTicket/queryTicketPrice",
+            }}
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            return fail("PRICE_QUERY_FAILED", "票价查询失败，请稍后重试")
     
     def _filter_trains(
         self,

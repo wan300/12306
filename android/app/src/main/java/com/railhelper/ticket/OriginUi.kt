@@ -35,14 +35,14 @@ import androidx.compose.ui.unit.dp
 object OriginColors {
     val Blue = Color(0xFF3B99FC)
     val BlueDark = Color(0xFF298CCF)
-    val Page = Color(0xFFF0F0F0)
+    val Page = Color(0xFFF5F5F5)
     val Card = Color.White
     val TextPrimary = Color(0xFF333333)
     val TextSecondary = Color(0xFF666666)
     val TextMuted = Color(0xFF999999)
     val Divider = Color(0xFFEAEAEA)
     val Warning = Color(0xFFFF7A1A)
-    val Success = Color(0xFF1AA36F)
+    val Success = Color(0xFF32B976)
     val Danger = Color(0xFFE03412)
 }
 
@@ -56,9 +56,28 @@ private val originColorScheme: ColorScheme
         primary = OriginColors.Blue,
         onPrimary = Color.White,
         secondary = OriginColors.BlueDark,
+        onSecondary = Color.White,
+        primaryContainer = Color(0xFFE9F4FF),
+        onPrimaryContainer = OriginColors.Blue,
+        secondaryContainer = Color(0xFFE9F4FF),
+        onSecondaryContainer = OriginColors.Blue,
+        tertiary = OriginColors.Blue,
+        tertiaryContainer = Color(0xFFE9F4FF),
+        onTertiaryContainer = OriginColors.Blue,
         background = OriginColors.Page,
+        onBackground = OriginColors.TextPrimary,
         surface = OriginColors.Card,
         onSurface = OriginColors.TextPrimary,
+        surfaceVariant = Color(0xFFF5F5F5),
+        onSurfaceVariant = OriginColors.TextSecondary,
+        surfaceTint = Color.Transparent,
+        surfaceContainer = Color.White,
+        surfaceContainerHigh = Color.White,
+        surfaceContainerHighest = Color(0xFFF5F5F5),
+        surfaceContainerLow = Color.White,
+        surfaceContainerLowest = Color.White,
+        outline = Color(0xFFDDDDDD),
+        outlineVariant = OriginColors.Divider,
         error = OriginColors.Danger,
     )
 

@@ -20,6 +20,8 @@ _login_challenges: Dict[str, Dict[str, Any]] = {}
 _task_events: Dict[int, threading.Event] = {}
 _task_threads: Dict[int, threading.Thread] = {}
 _scheduler_lock = threading.RLock()
+_waitlist_sessions: Dict[str, Any] = {}
+_waitlist_lock = threading.RLock()
 LOGIN_CHALLENGE_TTL_SECONDS = 10 * 60
 
 
@@ -48,8 +50,17 @@ def _clear_login_service_session(session_key: Optional[str]) -> None:
 
 def _remove_login_challenge(challenge_id: str, *, clear_session: bool = False) -> Optional[Dict[str, Any]]:
     challenge = _login_challenges.pop(challenge_id, None)
+    service = challenge.get("service") if challenge else None
+    if service:
+        try:
+            _run(service.close(), timeout=10)
+        except Exception:
+            pass
     if clear_session and challenge:
-        _clear_login_service_session(challenge.get("session_key"))
+        if service:
+            service.clear_session()
+        else:
+            _clear_login_service_session(challenge.get("session_key"))
     return challenge
 
 
@@ -434,8 +445,11 @@ def create_login_qrcode() -> str:
         login_service = LoginService(session_key)
         qr_uuid, image_base64, error = _run(login_service.get_qr_code())
         if error or not qr_uuid or not image_base64:
+            _run(login_service.close(), timeout=10)
             return _fail(error or "Failed to create QR code")
         _login_challenges[challenge_id] = {
+            # QR creation, polling and authentication share the Set-Cookie jar.
+            "service": login_service,
             "session_key": session_key,
             "uuid": qr_uuid,
             "created_at": time.time(),
@@ -454,15 +468,15 @@ def check_login_qrcode_status(challenge_id: str) -> str:
         if not challenge:
             return _fail("Login challenge not found or expired")
 
-        login_service = LoginService(str(challenge["session_key"]))
+        login_service = challenge.get("service") or LoginService(str(challenge["session_key"]))
         status, _uamtk = _run(login_service.check_qr_status(challenge["uuid"]))
         message = {
-            QRCodeStatus.WAITING: "Waiting for scan",
-            QRCodeStatus.SCANNED: "Scanned, confirm in 12306",
-            QRCodeStatus.CONFIRMED: "Confirmed",
-            QRCodeStatus.EXPIRED: "QR code expired",
-            QRCodeStatus.ERROR: "QR status error",
-        }.get(status, "Unknown status")
+            QRCodeStatus.WAITING: "等待扫码",
+            QRCodeStatus.SCANNED: "已扫码，请在铁路12306确认",
+            QRCodeStatus.CONFIRMED: "已确认，正在验证登录",
+            QRCodeStatus.EXPIRED: "二维码已过期，请刷新",
+            QRCodeStatus.ERROR: "暂时无法获取扫码状态，请重试",
+        }.get(status, "正在等待登录结果")
 
         auth = None
         is_success = False
@@ -708,6 +722,100 @@ def query_tickets(params_json: str) -> str:
         return _fail(str(exc), {"total": 0, "trains": []})
 
 
+def query_train_prices(params_json: str) -> str:
+    try:
+        from app.services.query_service import QueryService
+        params = json.loads(params_json or "{}")
+        service = QueryService(_current_cookies())
+        try:
+            response = _run(service.query_prices(**{
+                key: params.get(key, "") for key in
+                ("train_no", "from_station_no", "to_station_no", "seat_types", "train_date")
+            }))
+        finally:
+            _run(service.close(), timeout=10)
+        return json.dumps(response, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"success": False, "code": "PRICE_QUERY_FAILED",
+                           "message": "票价查询失败，请稍后重试", "data": {"prices_fen": {}}}, ensure_ascii=False)
+
+
+def _waitlist_account_key(cookies):
+    return hashlib.sha256(json.dumps(cookies, sort_keys=True).encode()).hexdigest()
+
+
+def prepare_waitlist(params_json: str) -> str:
+    from app.services.waitlist_service import WaitlistService, result
+    service = None
+    try:
+        with _waitlist_lock:
+            params = json.loads(params_json or "{}")
+            cookies = _current_cookies()
+            key = _waitlist_account_key(cookies)
+            # A preparation replaces the account's server-side draft. Retire older
+            # handles so another screen cannot submit that changed draft.
+            for session_id, (account, old) in list(_waitlist_sessions.items()):
+                if account == key or time.monotonic() - old.created > old.TTL:
+                    _run(old.close(), timeout=10)
+                    _waitlist_sessions.pop(session_id, None)
+            service = WaitlistService(cookies)
+            response = _run(asyncio.wait_for(service.prepare(params.get("choices", [])), timeout=85), timeout=90)
+            if response["success"]:
+                _waitlist_sessions[service.session_id] = (key, service)
+            else:
+                _run(service.close(), timeout=10)
+            return json.dumps(response, ensure_ascii=False)
+    except Exception:
+        if service:
+            try:
+                _run(service.close(), timeout=10)
+            except Exception:
+                pass
+        return json.dumps(result(False, "WAITLIST_PREPARE_FAILED", "无法获取候补信息，请稍后重试"), ensure_ascii=False)
+
+
+def submit_waitlist(params_json: str) -> str:
+    from app.services.waitlist_service import result
+    try:
+        with _waitlist_lock:
+            params = json.loads(params_json or "{}")
+            entry = _waitlist_sessions.get(params.get("session_id", ""))
+            if not entry or entry[0] != _waitlist_account_key(_current_cookies()):
+                response = result(False, "SESSION_EXPIRED", "登录或候补信息已变化，请重新确认候补清单")
+            elif params.get("confirmed") is not True:
+                response = result(False, "CONFIRMATION_REQUIRED", "请确认候补车次、乘车人和截止兑现时间")
+            else:
+                response = _run(asyncio.wait_for(entry[1].submit(params.get("passenger_ids", []), params.get("deadline_minutes", ""),
+                                               params.get("accept_standing") is True, params.get("new_trains")), timeout=35), timeout=40)
+            return json.dumps(response, ensure_ascii=False)
+    except Exception:
+        return json.dumps(result(False, "SUBMISSION_UNKNOWN", "提交结果尚未确认，请刷新订单状态，勿重复提交", {"state": "unknown"}), ensure_ascii=False)
+
+
+def query_waitlist_status(params_json: str = "{}") -> str:
+    from app.services.waitlist_service import WaitlistService, result
+    service, temporary = None, False
+    try:
+        with _waitlist_lock:
+            params = json.loads(params_json or "{}")
+            cookies = _current_cookies()
+            entry = _waitlist_sessions.get(params.get("session_id", ""))
+            if entry and entry[0] == _waitlist_account_key(cookies):
+                service = entry[1]
+            else:
+                service, temporary = WaitlistService(cookies), True
+            response = _run(asyncio.wait_for(service.status(), timeout=45), timeout=50)
+            return json.dumps(response, ensure_ascii=False)
+    except Exception:
+        return json.dumps(result(False, "STATUS_UNAVAILABLE", "暂时无法查询候补订单，请稍后刷新"), ensure_ascii=False)
+    finally:
+        if temporary and service:
+            try:
+                _run(service.close(), timeout=10)
+            except Exception:
+                pass
+
+
 def get_passengers() -> str:
     try:
         from app.services.order_service import OrderService
@@ -752,7 +860,10 @@ def _normalize_task_payload(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _row_to_task(row: sqlite3.Row) -> Dict[str, Any]:
-    return {key: row[key] for key in row.keys()}
+    from app.services.task_messages import task_message
+    result = {key: row[key] for key in row.keys()}
+    result["result_message"] = task_message(result.get("result_message"))
+    return result
 
 
 def get_tasks(status: str = "") -> str:
@@ -921,12 +1032,15 @@ def get_running_task_count() -> str:
 
 
 def get_task_logs(task_id: int, limit: int = 200) -> str:
+    from app.services.task_messages import task_message
     with _db_lock, _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM task_logs WHERE task_id = ? ORDER BY id DESC LIMIT ?",
             (int(task_id), int(limit)),
         ).fetchall()
     logs = [{key: row[key] for key in row.keys()} for row in reversed(rows)]
+    for log in logs:
+        log["message"] = task_message(log["message"])
     return _ok({"total": len(logs), "logs": logs})
 
 
@@ -948,6 +1062,8 @@ def _update_task_status(task_id: int, status: str, **fields: Any) -> None:
 
 
 def _add_log(task_id: int, level: str, message: str, details: str = None) -> None:
+    from app.services.task_messages import task_message
+    message = task_message(message)
     with _db_lock, _connect() as conn:
         conn.execute(
             "INSERT INTO task_logs(task_id, level, message, details, created_at) VALUES(?, ?, ?, ?, ?)",
@@ -1000,6 +1116,7 @@ async def _execute_task_once(task_id: int) -> None:
         return
 
     cookies = _cookies_from_user_row(user)
+    _add_log(task_id, "info", f"第 {int(row['retry_count']) + 1} 次查票：{row['train_date']} {row['from_station']} → {row['to_station']}")
     query_service = QueryService(cookies)
     try:
         train_types = row["train_types"].split(",") if row["train_types"] else None
@@ -1048,6 +1165,7 @@ async def _execute_task_once(task_id: int) -> None:
 
             order_service = OrderService(cookies)
             try:
+                _add_log(task_id, "info", "正在获取乘车人并核对所选票种")
                 success, api_passengers, passenger_error = await order_service.query_passengers()
                 if not success or not api_passengers:
                     _add_log(task_id, "warning", f"Passenger query failed: {passenger_error}")
@@ -1073,6 +1191,7 @@ async def _execute_task_once(task_id: int) -> None:
                     secret_str=train.secret_str,
                     passengers=matched,
                     seat_type=seat_type,
+                    on_progress=lambda message: _add_log(task_id, "info", message),
                 )
                 if result.success:
                     _update_task_status(
@@ -1085,6 +1204,10 @@ async def _execute_task_once(task_id: int) -> None:
                     _add_log(task_id, "success", f"Order submitted: {result.order_id}")
                     return
                 _add_log(task_id, "warning", f"Order failed: {result.message}")
+                if result.requires_review:
+                    _update_task_status(task_id, "paused", result_message=result.message)
+                    _add_log(task_id, "warning", "任务已自动暂停：订单结果尚未确认，请先核对官方未完成订单，避免重复提交")
+                    return
             finally:
                 await order_service.close()
         scan_details.append(f"{train.train_code}[{', '.join(seat_status)}]")

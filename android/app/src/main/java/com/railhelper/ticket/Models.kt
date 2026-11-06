@@ -39,7 +39,19 @@ data class TrainInfo(
     val softSleeper: String,
     val hardSleeper: String,
     val hardSeat: String,
-    val noSeat: String
+    val noSeat: String,
+    val trainNo: String = "",
+    val fromStationCode: String = "",
+    val toStationCode: String = "",
+    val fromStationNo: String = "",
+    val toStationNo: String = "",
+    val seatTypes: String = "",
+    val pricesFen: Map<String, Int> = emptyMap(),
+    val priceSource: String = "",
+    val waitlistSupported: Boolean = false,
+    val waitlistRestrictedSeats: String = "",
+    val otherSeats: List<TicketSeat> = emptyList(),
+    val quietCarriage: Boolean = false,
 )
 
 data class TicketTask(
@@ -149,10 +161,34 @@ fun parseTrains(array: JSONArray?): List<TrainInfo> {
             softSleeper = json.optString("soft_sleeper", "--"),
             hardSleeper = json.optString("hard_sleeper", "--"),
             hardSeat = json.optString("hard_seat", "--"),
-            noSeat = json.optString("no_seat", "--")
+            noSeat = json.optString("no_seat", "--"),
+            trainNo = json.optString("train_no"),
+            fromStationCode = json.optString("from_station_code"),
+            toStationCode = json.optString("to_station_code"),
+            fromStationNo = json.optString("from_station_no"),
+            toStationNo = json.optString("to_station_no"),
+            seatTypes = json.optString("seat_types"),
+            pricesFen = parsePrices(json.optJSONObject("prices_fen")),
+            priceSource = json.optString("price_source"),
+            waitlistSupported = json.optBoolean("waitlist_supported", false),
+            waitlistRestrictedSeats = json.optString("waitlist_restricted_seats"),
+            quietCarriage = json.optBoolean("quiet_carriage", false),
+            otherSeats = listOf(
+                TicketSeat("D", "优选一等", json.optString("preferred_first_seat", "--")),
+                TicketSeat("F", "动卧", json.optString("moving_sleeper", "--")),
+                TicketSeat("P", "特等", json.optString("premier_first", "--")),
+                TicketSeat("6", "高级软卧", json.optString("advanced_soft_sleeper", "--")),
+                TicketSeat("2", "软座", json.optString("soft_seat", "--")),
+                TicketSeat("I", "一等卧", json.optString("first_sleeper", "--")),
+                TicketSeat("J", "二等卧", json.optString("second_sleeper", "--")),
+            ).filter { it.count.isNotBlank() && it.count !in listOf("--", "*") },
         )
     }
 }
+
+fun parsePrices(json: JSONObject?): Map<String, Int> = json?.keys()?.asSequence()?.mapNotNull { key ->
+    json.optLong(key, -1).takeIf { it in 1..100_000_000L }?.let { key to it.toInt() }
+}?.toMap() ?: emptyMap()
 
 fun parseTasks(array: JSONArray?): List<TicketTask> {
     if (array == null) return emptyList()

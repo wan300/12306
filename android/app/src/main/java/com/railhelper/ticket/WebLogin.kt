@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -28,6 +29,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,8 +49,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,16 +67,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-
-private enum class LoginMode {
-    Password,
-    Qr
-}
 
 @Composable
 fun WebLoginScreen(
@@ -99,48 +96,23 @@ private fun NativeLoginScreen(
     onLogout: () -> Unit,
     onMessage: (String) -> Unit
 ) {
-    if (user != null) {
+    var reauthenticate by remember { mutableStateOf(false) }
+    if (user != null && !reauthenticate) {
         LoggedInPanel(user = user, onLogout = {
             clearWebLoginCookies()
             onLogout()
-        })
+        }, onReauthenticate = { reauthenticate = true })
         return
     }
-
-    var mode by rememberSaveable { mutableStateOf(LoginMode.Password) }
-
-    Column(Modifier.fillMaxSize().originPage()) {
-        TabRow(selectedTabIndex = if (mode == LoginMode.Password) 0 else 1) {
-            Tab(
-                selected = mode == LoginMode.Password,
-                onClick = { mode = LoginMode.Password },
-                text = { Text("账号登录") }
-            )
-            Tab(
-                selected = mode == LoginMode.Qr,
-                onClick = { mode = LoginMode.Qr },
-                text = { Text("扫码登录") }
-            )
-        }
-
-        when (mode) {
-            LoginMode.Password -> PasswordLoginPanel(
-                onLoggedIn = onLoggedIn,
-                onMessage = onMessage,
-                onSwitchToQr = { mode = LoginMode.Qr }
-            )
-
-            LoginMode.Qr -> QrFallbackLoginPanel(
-                onLoggedIn = onLoggedIn,
-                onMessage = onMessage,
-                onBackToPassword = { mode = LoginMode.Password }
-            )
-        }
-    }
+    androidx.activity.compose.BackHandler(enabled = reauthenticate) { reauthenticate = false }
+    PasswordLoginPanel(onLoggedIn = {
+        reauthenticate = false
+        onLoggedIn()
+    }, onMessage = onMessage)
 }
 
 @Composable
-private fun LoggedInPanel(user: User, onLogout: () -> Unit) {
+private fun LoggedInPanel(user: User, onLogout: () -> Unit, onReauthenticate: () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().originPage(),
         contentPadding = PaddingValues(OriginPagePadding),
@@ -150,6 +122,7 @@ private fun LoggedInPanel(user: User, onLogout: () -> Unit) {
             OriginCard(contentPadding = 16.dp) {
                 OriginSectionHeader("已登录")
                 Text(user.railwayUsername, fontWeight = FontWeight.SemiBold, color = OriginColors.TextPrimary)
+                OriginPrimaryButton(onClick = onReauthenticate) { Text("重新登录") }
                 OriginSecondaryButton(onClick = onLogout) { Text("退出登录") }
             }
         }
@@ -159,8 +132,7 @@ private fun LoggedInPanel(user: User, onLogout: () -> Unit) {
 @Composable
 private fun PasswordLoginPanel(
     onLoggedIn: () -> Unit,
-    onMessage: (String) -> Unit,
-    onSwitchToQr: () -> Unit
+    onMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -168,7 +140,7 @@ private fun PasswordLoginPanel(
     val initialCredentials = remember { credentialStore.load() }
 
     var username by rememberSaveable { mutableStateOf(initialCredentials.username) }
-    var password by rememberSaveable { mutableStateOf(initialCredentials.password) }
+    var password by remember { mutableStateOf(initialCredentials.password) }
     var rememberUsername by rememberSaveable {
         mutableStateOf(initialCredentials.rememberUsername || initialCredentials.username.isNotBlank())
     }
@@ -177,14 +149,24 @@ private fun PasswordLoginPanel(
     }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
-    var status by rememberSaveable { mutableStateOf("请输入 12306 账号和密码") }
-    var challengeId by rememberSaveable { mutableStateOf("") }
-    var verificationMode by rememberSaveable { mutableStateOf("") }
-    var slideToken by rememberSaveable { mutableStateOf("") }
-    var availableVerifications by rememberSaveable { mutableStateOf(listOf<String>()) }
-    var smsCastNum by rememberSaveable { mutableStateOf("") }
-    var smsCode by rememberSaveable { mutableStateOf("") }
-    var smsSent by rememberSaveable { mutableStateOf(false) }
+    var status by remember { mutableStateOf("") }
+    var challengeId by remember { mutableStateOf("") }
+    var verificationMode by remember { mutableStateOf("") }
+    var slideToken by remember { mutableStateOf("") }
+    var availableVerifications by remember { mutableStateOf(listOf<String>()) }
+    var smsCastNum by remember { mutableStateOf("") }
+    var smsCode by remember { mutableStateOf("") }
+    var smsSent by remember { mutableStateOf(false) }
+    var smsRetryAt by remember { mutableStateOf(0L) }
+    var smsCountdown by remember { mutableStateOf(0) }
+    var optionsExpanded by rememberSaveable { mutableStateOf(false) }
+    var showRecovery by remember { mutableStateOf(false) }
+    LaunchedEffect(smsRetryAt) {
+        do {
+            smsCountdown = ((smsRetryAt - SystemClock.elapsedRealtime() + 999) / 1000).toInt().coerceAtLeast(0)
+            if (smsCountdown > 0) delay(250)
+        } while (smsCountdown > 0)
+    }
 
     fun saveCredentials() {
         credentialStore.save(username, password, rememberUsername, rememberPassword)
@@ -198,6 +180,7 @@ private fun PasswordLoginPanel(
         smsCastNum = ""
         smsCode = ""
         smsSent = false
+        smsRetryAt = 0L
     }
 
     fun handleLoginResponse(res: JSONObject) {
@@ -222,8 +205,8 @@ private fun PasswordLoginPanel(
                 slideToken = data.optString("slide_token")
                 availableVerifications = data.optJSONArray("available_verifications").toStringList()
                 verificationMode = when {
-                    availableVerifications.contains("slide") && slideToken.isNotBlank() -> "slide"
                     availableVerifications.contains("sms") -> "sms"
+                    availableVerifications.contains("slide") && slideToken.isNotBlank() -> "slide"
                     else -> data.optString("verification_type")
                 }
                 status = data.optString("message", "请完成 12306 登录验证")
@@ -231,7 +214,7 @@ private fun PasswordLoginPanel(
 
             "manual_required" -> {
                 resetChallenge()
-                status = data.optString("message", "12306 要求额外人工验证，请切换扫码登录")
+                status = data.optString("message", "请在铁路12306完成账号核验后重试")
                 onMessage(status)
             }
 
@@ -243,9 +226,10 @@ private fun PasswordLoginPanel(
     }
 
     fun startPasswordLogin() {
+        if (loading) return
         val normalizedUsername = username.trim()
         if (normalizedUsername.isBlank() || password.isBlank()) {
-            status = "请输入 12306 账号和密码"
+            status = "请输入绑定12306的手机号和密码"
             return
         }
         scope.launch {
@@ -265,12 +249,14 @@ private fun PasswordLoginPanel(
             status = "正在提交验证结果..."
             val res = PythonBridge.call("complete_password_login", challengeId, payload.toString())
             loading = false
+            // The bridge discards a failed challenge; return to a fresh login attempt.
+            if (!res.success()) resetChallenge()
             handleLoginResponse(res)
         }
     }
 
     fun sendSmsCode() {
-        if (challengeId.isBlank()) return
+        if (challengeId.isBlank() || loading || smsCountdown > 0) return
         if (smsCastNum.trim().length != 4) {
             status = "请输入证件号后 4 位"
             return
@@ -282,6 +268,8 @@ private fun PasswordLoginPanel(
             loading = false
             if (res.success()) {
                 smsSent = true
+                smsCode = ""
+                smsRetryAt = SystemClock.elapsedRealtime() + 60_000L
                 status = res.message().ifBlank { "短信验证码已发送" }
             } else {
                 status = res.message().ifBlank { "短信验证码发送失败" }
@@ -290,134 +278,93 @@ private fun PasswordLoginPanel(
         }
     }
 
+    if (showRecovery) {
+        PasswordRecoveryScreen(onBack = { showRecovery = false })
+        return
+    }
+
+    androidx.activity.compose.BackHandler(enabled = challengeId.isNotBlank()) {
+        resetChallenge()
+        status = ""
+    }
+
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .originPage()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(OriginPagePadding),
+        modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.White)
+            .imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        OriginCard(contentPadding = 16.dp) {
-        OriginSectionHeader("12306 账号登录")
-
-        OutlinedTextField(
-            value = username,
-            onValueChange = { username = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("用户名 / 邮箱 / 手机号") },
-            singleLine = true,
-            enabled = !loading,
-            colors = OriginFieldColors()
-        )
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("密码") },
-            singleLine = true,
-            enabled = !loading,
-            colors = OriginFieldColors(),
-            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Icon(
-                        imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码"
-                    )
+        LoginHeading(verifying = challengeId.isNotBlank())
+        if (challengeId.isBlank()) {
+            LoginField(username, { username = it }, "手机号 / 用户名 / 邮箱", !loading)
+            LoginField(password, { password = it }, "12306 密码", !loading,
+                keyboardType = KeyboardType.Password,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (passwordVisible) "隐藏密码" else "显示密码")
+                    }
+                })
+            Text("身份验证时优先使用短信验证码", fontSize = 12.sp, color = OriginColors.TextSecondary)
+            Spacer(Modifier.height(4.dp))
+            LoginAction("登录", enabled = !loading && username.isNotBlank() && password.isNotBlank(),
+                loading = loading, onClick = ::startPasswordLogin)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(onClick = { showRecovery = true }, enabled = !loading) {
+                    Text("忘记密码？", fontSize = 13.sp)
+                }
+                TextButton(onClick = { optionsExpanded = !optionsExpanded }, enabled = !loading) {
+                    Text(if (optionsExpanded) "收起登录设置" else "登录设置", fontSize = 13.sp)
                 }
             }
-        )
-
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = rememberUsername,
-                    onCheckedChange = { checked ->
-                        rememberUsername = checked
-                        if (!checked) rememberPassword = false
-                    },
-                    enabled = !loading
-                )
-                Text("记住账号")
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = rememberPassword,
-                    onCheckedChange = { checked ->
-                        rememberPassword = checked
-                        if (checked) rememberUsername = true
-                    },
-                    enabled = !loading
-                )
-                Text("记住密码")
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OriginPrimaryButton(onClick = ::startPasswordLogin, enabled = !loading, modifier = Modifier.weight(1f)) {
-                if (loading && challengeId.isBlank()) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(8.dp))
+            if (optionsExpanded) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = rememberUsername, onCheckedChange = {
+                        rememberUsername = it
+                        if (!it) rememberPassword = false
+                    }, enabled = !loading)
+                    Text("记住账号", fontSize = 14.sp, color = OriginColors.TextPrimary)
+                    Checkbox(checked = rememberPassword, onCheckedChange = {
+                        rememberPassword = it
+                        if (it) rememberUsername = true
+                    }, enabled = !loading)
+                    Text("记住密码", fontSize = 14.sp, color = OriginColors.TextPrimary)
                 }
-                Text("登录")
+                TextButton(onClick = {
+                    credentialStore.clear()
+                    username = ""
+                    password = ""
+                    rememberUsername = false
+                    rememberPassword = false
+                    resetChallenge()
+                    status = "已清除保存的账号密码"
+                }, enabled = !loading) { Text("清除保存的账号密码", fontSize = 13.sp) }
             }
-            OriginSecondaryButton(onClick = onSwitchToQr, enabled = !loading) {
-                Text("扫码")
-            }
-        }
-
-        Text(status, style = MaterialTheme.typography.bodyMedium, color = OriginColors.TextSecondary)
-        if (loading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-        }
-
-        if (challengeId.isNotBlank()) {
+        } else {
             VerificationPanel(
-                mode = verificationMode,
-                availableVerifications = availableVerifications,
-                slideToken = slideToken,
-                smsCastNum = smsCastNum,
-                smsCode = smsCode,
-                smsSent = smsSent,
-                loading = loading,
-                onModeChange = { verificationMode = it },
-                onSmsCastNumChange = { smsCastNum = it.take(4) },
-                onSmsCodeChange = { smsCode = it },
+                mode = verificationMode, availableVerifications = availableVerifications,
+                slideToken = slideToken, smsCastNum = smsCastNum, smsCode = smsCode,
+                smsSent = smsSent, smsCountdown = smsCountdown, loading = loading,
+                onModeChange = { verificationMode = it; status = "" },
+                onSmsCastNumChange = { smsCastNum = it.filterNot(Char::isWhitespace).take(4) },
+                onSmsCodeChange = { smsCode = it.filter { char -> char in '0'..'9' }.take(6) },
                 onSendSms = ::sendSmsCode,
                 onSubmitSms = {
-                    if (smsCode.isBlank()) {
-                        status = "请输入短信验证码"
-                    } else {
-                        completeVerification(JSONObject().put("type", "sms").put("randCode", smsCode.trim()))
-                    }
+                    if (smsCode.isBlank()) status = "请输入短信验证码"
+                    else completeVerification(JSONObject().put("type", "sms").put("randCode", smsCode.trim()))
                 },
                 onSlideVerified = { payload -> completeVerification(payload.put("type", "slide")) },
-                onMessage = {
-                    status = it
-                    onMessage(it)
-                }
+                onMessage = { status = it; onMessage(it) }
             )
+            TextButton(onClick = { resetChallenge(); status = "" }, enabled = !loading) { Text("返回账号登录") }
         }
-
-        OriginTextButton(
-            onClick = {
-                credentialStore.clear()
-                username = ""
-                password = ""
-                rememberUsername = false
-                rememberPassword = false
-                resetChallenge()
-                status = "已清除保存的账号密码"
-            },
-            enabled = !loading
-        ) {
-            Text("清除保存的账号密码")
+        if (status.isNotBlank()) {
+            Text(status, fontSize = 13.sp, lineHeight = 20.sp, color = OriginColors.TextSecondary)
         }
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(color = OriginColors.Divider)
+        Text("12306 网页账号登录仍需密码；短信验证码用于身份验证。", fontSize = 12.sp,
+            lineHeight = 19.sp, color = OriginColors.TextMuted)
     }
 }
 
@@ -429,6 +376,7 @@ private fun VerificationPanel(
     smsCastNum: String,
     smsCode: String,
     smsSent: Boolean,
+    smsCountdown: Int,
     loading: Boolean,
     onModeChange: (String) -> Unit,
     onSmsCastNumChange: (String) -> Unit,
@@ -438,72 +386,37 @@ private fun VerificationPanel(
     onSlideVerified: (JSONObject) -> Unit,
     onMessage: (String) -> Unit
 ) {
-    OriginCard(contentPadding = 16.dp) {
-            OriginSectionHeader("登录验证")
-
-            if (availableVerifications.size > 1) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (availableVerifications.contains("slide")) {
-                        OriginSecondaryButton(onClick = { onModeChange("slide") }, enabled = !loading) {
-                            Text("滑块验证")
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        when (mode) {
+            "sms" -> {
+                Text("短信验证", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = OriginColors.TextPrimary)
+                Text("请输入登录账号绑定的证件号后 4 位，验证码将发送至绑定手机。",
+                    fontSize = 13.sp, lineHeight = 21.sp, color = OriginColors.TextSecondary)
+                LoginField(smsCastNum, onSmsCastNumChange, "证件号后 4 位", !loading && smsCountdown == 0,
+                    keyboardType = KeyboardType.Ascii)
+                LoginField(smsCode, onSmsCodeChange, "短信验证码", !loading,
+                    keyboardType = KeyboardType.Number,
+                    trailingIcon = {
+                        TextButton(onClick = onSendSms,
+                            enabled = !loading && smsCountdown == 0 && smsCastNum.length == 4) {
+                            Text(if (smsCountdown > 0) "${smsCountdown}s 后重发" else if (smsSent) "重新获取" else "获取验证码", fontSize = 13.sp)
                         }
-                    }
-                    if (availableVerifications.contains("sms")) {
-                        OriginSecondaryButton(onClick = { onModeChange("sms") }, enabled = !loading) {
-                            Text("短信验证")
-                        }
-                    }
-                }
+                    })
+                LoginAction("验证并登录", enabled = !loading && smsSent && smsCode.isNotBlank(),
+                    loading = loading, onClick = onSubmitSms)
             }
-
-            when (mode) {
-                "slide" -> {
-                    if (slideToken.isBlank()) {
-                        Text("12306 未返回滑块验证 token，请切换短信或扫码登录")
-                    } else {
-                        SlideVerificationWebView(
-                            slideToken = slideToken,
-                            onVerified = onSlideVerified,
-                            onMessage = onMessage
-                        )
-                    }
-                }
-
-                "sms" -> {
-                    OutlinedTextField(
-                        value = smsCastNum,
-                        onValueChange = onSmsCastNumChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("证件号后 4 位") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                        enabled = !loading,
-                        colors = OriginFieldColors()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OriginPrimaryButton(onClick = onSendSms, enabled = !loading, modifier = Modifier.weight(1f)) {
-                            Text(if (smsSent) "重新发送" else "获取验证码")
-                        }
-                    }
-                    OutlinedTextField(
-                        value = smsCode,
-                        onValueChange = onSmsCodeChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("短信验证码") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        enabled = !loading,
-                        colors = OriginFieldColors()
-                    )
-                    OriginPrimaryButton(onClick = onSubmitSms, enabled = !loading && smsSent, modifier = Modifier.fillMaxWidth()) {
-                        Text("提交验证码")
-                    }
-                }
-
-                else -> {
-                    Text("请选择验证方式")
-                }
+            "slide" -> {
+                Text("滑动验证", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = OriginColors.TextPrimary)
+                if (slideToken.isBlank()) Text("验证暂不可用，请返回账号登录后重试", color = OriginColors.TextSecondary)
+                else SlideVerificationWebView(slideToken, onSlideVerified, onMessage)
             }
+            else -> Text("验证暂不可用，请返回账号登录后重试", color = OriginColors.TextSecondary)
+        }
+        if (availableVerifications.size > 1) {
+            TextButton(onClick = { onModeChange(if (mode == "sms") "slide" else "sms") }, enabled = !loading) {
+                Text(if (mode == "sms") "其他方式：滑动验证" else "使用短信验证码", fontSize = 13.sp)
+            }
+        }
     }
 }
 
@@ -536,7 +449,7 @@ private fun SlideVerificationWebView(
                         error: WebResourceError?
                     ) {
                         if (request?.isForMainFrame == true) {
-                            onMessage("滑块验证加载失败，请切换扫码登录")
+                            onMessage("滑动验证暂不可用，请选择短信验证或稍后重试")
                         }
                     }
                 }
@@ -551,90 +464,6 @@ private fun SlideVerificationWebView(
             }
         }
     )
-}
-
-@Composable
-private fun QrFallbackLoginPanel(
-    onLoggedIn: () -> Unit,
-    onMessage: (String) -> Unit,
-    onBackToPassword: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var loading by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("等待获取二维码") }
-    var challengeId by remember { mutableStateOf("") }
-    var imageBase64 by remember { mutableStateOf("") }
-
-    fun requestQr() {
-        scope.launch {
-            loading = true
-            status = "正在获取二维码..."
-            val res = PythonBridge.call("create_login_qrcode")
-            loading = false
-            if (!res.success()) {
-                status = res.message()
-                onMessage(res.message())
-                return@launch
-            }
-            val data = res.dataObject()
-            challengeId = data?.optString("challenge_id").orEmpty()
-            imageBase64 = data?.optString("image_base64").orEmpty()
-            status = "请使用 12306 App 扫码确认"
-        }
-    }
-
-    LaunchedEffect(challengeId) {
-        while (challengeId.isNotBlank()) {
-            delay(2_000)
-            val res = PythonBridge.call("check_login_qrcode_status", challengeId)
-            val data = res.dataObject()
-            status = data?.optString("message").orEmpty().ifBlank { res.message() }
-            if (data?.optBoolean("is_success") == true) {
-                challengeId = ""
-                onLoggedIn()
-                break
-            }
-            val code = data?.optInt("status", -1) ?: -1
-            if (code == 3 || code == 5) {
-                challengeId = ""
-                break
-            }
-        }
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().originPage(),
-        contentPadding = PaddingValues(OriginPagePadding),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            OriginCard(contentPadding = 16.dp) {
-                    androidx.compose.foundation.layout.Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                    OriginSectionHeader("12306 扫码登录")
-                    if (imageBase64.isNotBlank()) {
-                        QrImage(imageBase64)
-                    } else {
-                        Icon(Icons.Default.DirectionsRailway, contentDescription = null, modifier = Modifier.size(96.dp))
-                    }
-                    Text(status, color = OriginColors.TextSecondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OriginPrimaryButton(onClick = ::requestQr, enabled = !loading) {
-                            Text(if (imageBase64.isBlank()) "获取二维码" else "刷新二维码")
-                        }
-                        OriginSecondaryButton(
-                            onClick = { shareQr(context, imageBase64, onMessage) },
-                            enabled = imageBase64.isNotBlank()
-                        ) { Text("分享二维码") }
-                    }
-                    OriginTextButton(onClick = onBackToPassword) { Text("返回账号登录") }
-                }
-            }
-        }
-    }
 }
 
 private fun WebView.configureForSlideVerification() {

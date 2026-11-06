@@ -1,74 +1,56 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
-  {
-    path: '/',
-    name: 'Home',
-    meta: { requiresAuth: true },
-    component: () => import('../views/Home.vue')
-  },
+  { path: '/', name: 'Home', component: () => import('../views/Home.vue') },
   {
     path: '/login',
     name: 'Login',
-    meta: { requiresAuth: false },
-    component: () => import('../views/Login.vue')
+    component: () => import('../views/Login.vue'),
   },
   {
     path: '/tasks',
     name: 'Tasks',
-    meta: { requiresAuth: true },
-    component: () => import('../views/Tasks.vue')
-  },
-  {
-    path: '/create-task',
-    name: 'CreateTask',
-    meta: { requiresAuth: true },
-    component: () => import('../views/CreateTask.vue')
-  },
-  {
-    path: '/edit-task/:id',
-    name: 'EditTask',
-    meta: { requiresAuth: true },
-    component: () => import('../views/CreateTask.vue')
+    component: () => import('../views/Tasks.vue'),
   },
   {
     path: '/query',
     name: 'Query',
-    meta: { requiresAuth: true },
-    component: () => import('../views/Query.vue')
+    component: () => import('../views/Query.vue'),
   },
   {
-    path: '/task/:id',
+    path: '/flights',
+    redirect: (to) => ({
+      path: '/query',
+      query: { ...to.query, type: 'flight' },
+    }),
+  },
+  {
+    path: '/create-task',
+    name: 'CreateTask',
+    component: () => import('../views/CreateTask.vue'),
+  },
+  {
+    path: '/edit-task/:id',
+    redirect: (to) => '/edit-task/rail/' + to.params.id,
+  },
+  {
+    path: '/edit-task/:kind(rail|flight)/:id',
+    name: 'EditTask',
+    component: () => import('../views/CreateTask.vue'),
+  },
+  { path: '/task/:id', redirect: (to) => '/task/rail/' + to.params.id },
+  {
+    path: '/task/:kind(rail|flight)/:id',
     name: 'TaskDetail',
-    meta: { requiresAuth: true },
-    component: () => import('../views/TaskDetail.vue')
+    component: () => import('../views/TaskDetail.vue'),
   },
   {
     path: '/notification',
     name: 'NotificationSettings',
-    meta: { requiresAuth: true },
-    component: () => import('../views/NotificationSettings.vue')
-  }
+    component: () => import('../views/NotificationSettings.vue'),
+  },
 ]
-
-const router = createRouter({
+export default createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
-  routes
+  routes,
 })
-
-router.beforeEach((to) => {
-  const token = localStorage.getItem('accessToken')
-  const requiresAuth = to.meta.requiresAuth !== false
-
-  if (requiresAuth && !token) {
-    return '/login'
-  }
-
-  if (!requiresAuth && token) {
-    return '/'
-  }
-
-  return true
-})
-
-export default router

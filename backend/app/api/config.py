@@ -15,8 +15,10 @@ from ..core.auth import get_current_user
 from ..core.database import get_db
 from ..models.config import SystemConfig
 from ..models.user import User
-from ..tasks.scheduler import get_scheduler
 from ..utils import notify
+from ..core.workspace_access import workspace_access
+from ..services.notification_service import normalize_config, channel_config
+from ..services.notification_service import notification_service
 
 router = APIRouter(prefix="/config", tags=["系统配置"])
 
@@ -24,10 +26,7 @@ NOTIFICATION_CONFIG_KEY = "notification_settings"
 
 
 def _normalize_notification_config(config: dict | None) -> dict:
-    normalized = dict(config or {})
-    # 通知配置页没有暴露一言开关，默认关闭，避免测试发送额外访问外部接口。
-    normalized.setdefault("HITOKOTO", "false")
-    return normalized
+    return normalize_config(config)
 
 
 async def _get_config(
@@ -40,7 +39,7 @@ async def _get_config(
 
 @router.get("/notification")
 async def get_notification_config(
-    _current_user: User = Depends(get_current_user),
+    _current_user = Depends(workspace_access),
     db: AsyncSession = Depends(get_db),
 ):
     """获取通知配置。"""
@@ -57,7 +56,7 @@ async def get_notification_config(
 @router.post("/notification")
 async def update_notification_config(
     config: dict,
-    _current_user: User = Depends(get_current_user),
+    _current_user = Depends(workspace_access),
     db: AsyncSession = Depends(get_db),
 ):
     """更新通知配置。"""
@@ -77,26 +76,22 @@ async def update_notification_config(
 
     await db.commit()
 
-    scheduler = get_scheduler()
-    await scheduler.reload_notification_config()
-
     return normalized
 
 
 @router.post("/notification/test")
 async def test_notification(
     config: dict,
-    _current_user: User = Depends(get_current_user),
+    _current_user = Depends(workspace_access),
 ):
     """测试发送通知。"""
     try:
-        notify.send(
-            "12306 助手测试通知",
+        await notification_service.deliver(
+            ("机票" if config.get("test_type") == "flight" else "火车票") + "助手测试通知",
             "通知服务配置成功。这是一条由测试发送按钮触发的消息。",
-            ignore_default_config=True,
-            **_normalize_notification_config(config),
+            _normalize_notification_config(config),
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="通知发送失败，请检查渠道配置") from None
 
     return {"success": True, "message": "测试请求已发送，请检查接收端"}

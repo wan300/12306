@@ -18,13 +18,12 @@ from sqlalchemy import select, update
 
 from ..core.config import get_settings
 from ..core.database import AsyncSessionLocal
-from ..models.config import SystemConfig
 from ..models.user import User
 from ..models.task import Task, TaskLog, TaskStatus
 from ..services.login_service import LoginService
 from ..services.query_service import QueryService
 from ..services.order_service import OrderService, Passenger
-from ..utils import notify
+from ..services.notification_service import notification_service
 
 settings = get_settings()
 
@@ -71,50 +70,15 @@ class TicketScheduler:
         # 服务实例缓存
         self._login_services: Dict[str, LoginService] = {}
 
-        # 通知配置缓存
-        self._notification_config: Dict = {}
     
     def start(self):
         """启动调度器"""
         if not self.scheduler.running:
             self.scheduler.start()
             print("[调度] 调度器已启动")
-            asyncio.create_task(self.reload_notification_config())
 
-    async def reload_notification_config(self):
-        """重新加载通知配置。"""
-        async with AsyncSessionLocal() as db:
-            stmt = select(SystemConfig).where(SystemConfig.key == "notification_settings")
-            result = await db.execute(stmt)
-            config = result.scalar_one_or_none()
-
-            if not config or not config.value:
-                self._notification_config = {}
-                return
-
-            try:
-                loaded = json.loads(config.value)
-                loaded.setdefault("HITOKOTO", "false")
-                self._notification_config = loaded
-                print("[调度] 通知配置已加载")
-            except Exception as exc:
-                self._notification_config = {}
-                print(f"[调度] 通知配置解析失败: {exc}")
-
-    def _send_notification(self, title: str, content: str):
-        """按当前通知配置发送消息。"""
-        if not self._notification_config:
-            return
-
-        try:
-            notify.send(
-                title,
-                content,
-                ignore_default_config=True,
-                **self._notification_config,
-            )
-        except Exception as exc:
-            print(f"[调度] 发送通知失败: {exc}")
+    async def _send_notification(self, db, task, event, title: str, content: str):
+        await notification_service.queue(db, "rail", task, event, "火车票 · " + title, content)
 
     def _task_summary(self, task: Task) -> str:
         return f"{task.name}\n行程: {task.from_station} -> {task.to_station}\n日期: {task.train_date}"
@@ -214,7 +178,7 @@ class TicketScheduler:
                 task.finished_at = datetime.utcnow() + timedelta(hours=8)
                 
                 await self._add_log(db, task_id, "error", "任务失败：超过最大重试次数")
-                self._send_notification(
+                await self._send_notification(db, task, "task_failed",
                     "12306 助手：抢票失败",
                     f"{self._task_summary(task)}\n原因: 超过最大重试次数\n时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 )
@@ -235,7 +199,7 @@ class TicketScheduler:
                 await self._add_log(db, task_id, "error", "用户未登录")
                 task.status = TaskStatus.FAILED
                 task.result_message = "用户未登录"
-                self._send_notification(
+                await self._send_notification(db, task, "login_required",
                     "12306 助手：抢票异常",
                     f"{self._task_summary(task)}\n原因: 用户未登录或会话丢失\n请重新登录后重启任务。",
                 )
@@ -267,7 +231,7 @@ class TicketScheduler:
                     
                     await self._add_log(db, task_id, "success", f"抢票成功！订单号: {order_id}")
                     passenger_names = ", ".join(extra_data.get("passenger_names", [])) if extra_data else ""
-                    self._send_notification(
+                    await self._send_notification(db, task, "order_created",
                         "12306 助手：抢票成功",
                         (
                             f"{self._task_summary(task)}\n"
@@ -282,7 +246,11 @@ class TicketScheduler:
                     )
                     await self.stop_task(task_id)
                 else:
+                    task.result_message = message
                     await self._add_log(db, task_id, "info", message)
+                    if extra_data and extra_data.get("tickets_available") and not task.auto_submit:
+                        await self._send_notification(db, task, "tickets_available",
+                            "发现余票", f"{self._task_summary(task)}\n{message}")
                     
                     # 检查是否因为未登录导致失败
                     if "未登录" in message or "登录已过期" in message:
@@ -290,7 +258,7 @@ class TicketScheduler:
                         task.result_message = message
                         task.finished_at = datetime.utcnow() + timedelta(hours=8)
                         await self._add_log(db, task_id, "error", f"任务停止: {message}")
-                        self._send_notification(
+                        await self._send_notification(db, task, "login_required",
                             "12306 助手：抢票异常",
                             f"{self._task_summary(task)}\n原因: {message}",
                         )
@@ -300,7 +268,7 @@ class TicketScheduler:
                 
             except Exception as e:
                 await self._add_log(db, task_id, "error", f"执行异常: {str(e)}")
-                self._send_notification(
+                await self._send_notification(db, task, "task_failed",
                     "12306 助手：任务执行异常",
                     f"{self._task_summary(task)}\n异常: {str(e)}",
                 )
@@ -478,7 +446,7 @@ class TicketScheduler:
                             msg = f"发现余票: {train.train_code} {seat_name}({seat_count})"
                             # 如果还没记录过这个车次的发现日志，记一下（防止scan_details里重复强调）
                             # 这里直接返回，外部会记录
-                            return False, "", f"{msg}, 等待手动下单", None
+                            return False, "", f"{msg}, 等待手动下单", {"tickets_available": True}
                 
                 # 记录该车次状态
                 scan_details.append(f"{train.train_code}[{', '.join(seat_status_list)}]")

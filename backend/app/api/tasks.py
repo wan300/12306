@@ -5,6 +5,7 @@
 """
 
 import json
+from uuid import uuid4
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, Depends
@@ -220,6 +221,7 @@ async def start_task(
     # 更新状态
     task.status = TaskStatus.RUNNING
     task.started_at = datetime.utcnow() + timedelta(hours=8)
+    task.notification_run_id = str(uuid4())
     task.retry_count = 0
     
     # 添加日志

@@ -1,289 +1,198 @@
 <template>
-  <div class="tasks-page">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>任务列表</span>
-          <div class="header-actions">
-            <el-select v-model="filterStatus" placeholder="状态筛选" clearable style="width: 120px; margin-right: 12px;">
-              <el-option label="全部" value="" />
-              <el-option label="待运行" value="pending" />
-              <el-option label="运行中" value="running" />
-              <el-option label="已暂停" value="paused" />
-              <el-option label="成功" value="success" />
-              <el-option label="失败" value="failed" />
-            </el-select>
-            <el-button type="primary" @click="$router.push('/create-task')">
-              <el-icon><Plus /></el-icon>
-              创建任务
-            </el-button>
-          </div>
+  <el-card>
+    <template #header>
+      <div class="task-toolbar">
+        <span>任务列表</span>
+        <div class="task-filters">
+          <el-select
+            v-model="kind"
+            placeholder="全部票种"
+            aria-label="票种筛选"
+            style="width: 120px"
+            ><el-option label="全部票种" value="" /><el-option
+              label="火车票"
+              value="rail" /><el-option label="机票" value="flight"
+          /></el-select>
+          <el-select
+            v-model="provider"
+            placeholder="全部平台"
+            aria-label="平台筛选"
+            style="width: 120px"
+            ><el-option label="全部平台" value="" /><el-option
+              v-for="(name, key) in providers"
+              :key="key"
+              :label="name"
+              :value="key"
+          /></el-select>
+          <el-select
+            v-model="status"
+            placeholder="全部状态"
+            aria-label="状态筛选"
+            style="width: 130px"
+            ><el-option label="全部状态" value="" /><el-option
+              v-for="(name, key) in statuses"
+              :key="key"
+              :label="name"
+              :value="key"
+          /></el-select>
+          <el-button :loading="store.loading" @click="store.load"
+            >刷新</el-button
+          >
+          <el-button type="primary" @click="router.push('/create-task')"
+            >创建任务</el-button
+          >
         </div>
-      </template>
-      
-      <el-table :data="filteredTasks" stripe v-loading="taskStore.loading">
-        <el-table-column prop="name" label="任务名称" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-link type="primary" @click="$router.push(`/task/${row.id}`)">
-              {{ row.name }}
-            </el-link>
-          </template>
-        </el-table-column>
-        <el-table-column label="行程" :min-width="isMobile ? 140 : 180" align="center">
-          <template #default="{ row }">
-            {{ row.from_station }} → {{ row.to_station }}
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isMobile" prop="train_date" label="日期" min-width="110" align="center" />
-        <el-table-column v-if="!isMobile" prop="seat_types" label="席别" min-width="100" align="center" />
-        <el-table-column v-if="!isMobile" prop="retry_count" label="重试次数" min-width="90" align="center" />
-        <el-table-column prop="status" label="状态" :min-width="isMobile ? 80 : 100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" :min-width="isMobile ? 180 : 230" :fixed="isMobile ? false : 'right'" align="center">
-          <template #default="{ row }">
-            <div class="action-buttons">
-              <div class="action-group">
-                <el-button
-                  v-if="['pending', 'paused', 'failed', 'cancelled'].includes(row.status)"
-                  type="primary"
-                  size="small"
-                  @click="$router.push(`/edit-task/${row.id}`)"
-                >
-                  编辑
-                </el-button>
-                <el-button
-                  v-if="['pending', 'paused'].includes(row.status)"
-                  type="success"
-                  size="small"
-                  :loading="processingTasks[row.id]"
-                  @click="handleStart(row)"
-                >
-                  启动
-                </el-button>
-                <el-button
-                  v-if="row.status === 'running'"
-                  type="warning"
-                  size="small"
-                  :loading="processingTasks[row.id]"
-                  @click="handleStop(row)"
-                >
-                  暂停
-                </el-button>
-                <el-button
-                  v-if="row.status !== 'success' && row.status !== 'cancelled'"
-                  type="danger"
-                  size="small"
-                  :loading="processingTasks[row.id]"
-                  @click="handleCancel(row)"
-                >
-                  取消
-                </el-button>
-              </div>
-              <el-button
-                v-if="row.status !== 'running'"
-                type="danger"
-                size="small"
-                link
-                class="btn-delete"
-                :loading="processingTasks[row.id]"
-                @click="handleDelete(row)"
-              >
-                删除
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无任务" />
-        </template>
-      </el-table>
-    </el-card>
-  </div>
+      </div>
+    </template>
+    <el-alert
+      v-for="error in store.errors"
+      :key="error"
+      :title="error"
+      type="warning"
+      :closable="false"
+    />
+    <el-table :data="filtered" row-key="key" v-loading="store.loading" stripe>
+      <el-table-column label="任务" min-width="170"
+        ><template #default="{ row }"
+          ><el-link type="primary" @click="router.push(row.detailPath)">{{
+            row.name
+          }}</el-link></template
+        ></el-table-column
+      >
+      <el-table-column label="票种 / 平台" min-width="120"
+        ><template #default="{ row }"
+          >{{ row.kind === "rail" ? "火车票" : "机票" }} ·
+          {{ providers[row.provider] }}</template
+        ></el-table-column
+      >
+      <el-table-column label="行程" min-width="160"
+        ><template #default="{ row }"
+          >{{ row.origin }} → {{ row.destination }}
+          <div class="task-secondary">
+            {{ row.date }} · {{ row.target }}
+          </div></template
+        ></el-table-column
+      >
+      <el-table-column label="状态" min-width="115"
+        ><template #default="{ row }"
+          ><el-tag
+            :type="
+              row.status === 'running'
+                ? 'success'
+                : ['unknown', 'failed'].includes(row.status)
+                  ? 'danger'
+                  : 'info'
+            "
+            >{{ row.statusLabel }}</el-tag
+          ></template
+        ></el-table-column
+      >
+      <el-table-column label="进展" min-width="200"
+        ><template #default="{ row }"
+          >{{ row.message }}
+          <div v-if="row.total" class="task-secondary">
+            含税 ¥{{ row.total }} / 预算 ¥{{ row.budget }}
+          </div>
+          <div v-else-if="row.indicativePrice" class="task-secondary">
+            参考价 ¥{{ row.indicativePrice }}（不含税）
+          </div>
+          <div v-if="row.orderId">订单 {{ row.orderId }}</div></template
+        ></el-table-column
+      >
+      <el-table-column label="操作" min-width="245"
+        ><template #default="{ row }">
+          <el-button
+            v-if="row.actions.edit"
+            text
+            @click="router.push(row.editPath)"
+            >编辑</el-button
+          >
+          <el-button
+            v-for="action in ['start', 'pause', 'cancel', 'remove']"
+            v-show="row.actions[action]"
+            :key="action"
+            text
+            :type="
+              action === 'remove' || action === 'cancel' ? 'danger' : 'primary'
+            "
+            :loading="processing[row.key]"
+            @click="control(row, action)"
+            >{{ actionNames[action] }}</el-button
+          >
+        </template></el-table-column
+      >
+    </el-table>
+  </el-card>
 </template>
-
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { useTaskStore } from '../stores/task'
-
-const taskStore = useTaskStore()
-
-const filterStatus = ref('')
-const processingTasks = ref({})
-const isMobile = ref(false)
-
-const checkScreenSize = () => {
-  isMobile.value = window.innerWidth < 768
-}
-
-const filteredTasks = computed(() => {
-  if (!filterStatus.value) return taskStore.tasks
-  return taskStore.tasks.filter(t => t.status === filterStatus.value)
-})
-
-const getStatusType = (status) => {
-  const types = {
-    pending: 'info',
-    running: 'warning',
-    paused: '',
-    success: 'success',
-    failed: 'danger',
-    cancelled: 'info'
-  }
-  return types[status] || 'info'
-}
-
-const getStatusText = (status) => {
-  const texts = {
-    pending: '待运行',
-    running: '运行中',
-    paused: '已暂停',
-    success: '成功',
-    failed: '失败',
-    cancelled: '已取消'
-  }
-  return texts[status] || status
-}
-
-const handleStart = async (task) => {
-  processingTasks.value[task.id] = true
+import { ref, computed, onMounted, onUnmounted } from "vue";
+import { useRouter } from "vue-router";
+import { ElMessage } from "element-plus";
+import { useTickets } from "../stores/tickets";
+const store = useTickets(),
+  router = useRouter();
+const kind = ref(""),
+  provider = ref(""),
+  status = ref(""),
+  processing = ref({});
+const providers = { 12306: "12306", ctrip: "携程", qunar: "去哪儿" };
+const statuses = {
+  pending: "待运行",
+  running: "运行中",
+  paused: "已暂停",
+  ready: "预算达标",
+  pending_payment: "订单待支付",
+  unknown: "结果待核对",
+  success: "订单已生成",
+  failed: "失败",
+  cancelled: "已取消",
+};
+const actionNames = {
+  start: "启动",
+  pause: "暂停",
+  cancel: "取消",
+  remove: "删除",
+};
+const filtered = computed(() =>
+  store.tasks.filter(
+    (row) =>
+      (!kind.value || row.kind === kind.value) &&
+      (!provider.value || row.provider === provider.value) &&
+      (!status.value || row.status === status.value),
+  ),
+);
+async function control(row, action) {
+  if (processing.value[row.key]) return;
+  processing.value[row.key] = true;
   try {
-    await taskStore.startTask(task.id)
-    ElMessage.success('任务已启动')
-    await taskStore.fetchTasks()
+    await store.control(row, action);
   } catch (error) {
-    ElMessage.error(error.message)
+    ElMessage.error(error.message);
   } finally {
-    processingTasks.value[task.id] = false
+    processing.value[row.key] = false;
   }
 }
-
-const handleStop = async (task) => {
-  processingTasks.value[task.id] = true
-  try {
-    await taskStore.stopTask(task.id)
-    ElMessage.success('任务已暂停')
-    await taskStore.fetchTasks()
-  } catch (error) {
-    ElMessage.error(error.message)
-  } finally {
-    processingTasks.value[task.id] = false
-  }
-}
-
-const handleCancel = async (task) => {
-  try {
-    await ElMessageBox.confirm('确定要取消该任务吗？', '确认')
-    processingTasks.value[task.id] = true
-    await taskStore.cancelTask(task.id)
-    ElMessage.success('任务已取消')
-    await taskStore.fetchTasks()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message)
-    }
-  } finally {
-    processingTasks.value[task.id] = false
-  }
-}
-
-const handleDelete = async (task) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该任务吗？此操作不可恢复。', '确认删除', { type: 'warning' })
-    processingTasks.value[task.id] = true
-    await taskStore.deleteTask(task.id)
-    ElMessage.success('任务已删除')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.message)
-    }
-  } finally {
-     if (task) processingTasks.value[task.id] = false
-  }
-}
-
-onMounted(async () => {
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-  await taskStore.fetchTasks()
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', checkScreenSize)
-})
+let timer;
+onMounted(() => {
+  store.load();
+  timer = setInterval(store.load, 5000);
+});
+onUnmounted(() => clearInterval(timer));
 </script>
-
 <style scoped>
-.card-header {
+.task-toolbar,
+.task-filters {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.task-toolbar {
   justify-content: space-between;
-  align-items: center;
 }
-
-.header-actions {
-  display: flex;
-  align-items: center;
-}
-
-.action-buttons {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.action-group {
-  display: flex;
-}
-
-.action-group .el-button {
-  margin: 0;
-  border-radius: 0;
-  border: none;
-  padding: 8px 15px;
-}
-
-.action-group .el-button:first-child {
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
-}
-
-.action-group .el-button:last-child {
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
-}
-
-.action-group .el-button:not(:first-child) {
-  border-left: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.btn-delete {
-  margin-left: 12px;
-}
-
-@media (max-width: 768px) {
-  .card-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .header-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .header-actions .el-select {
-    flex: 1;
-    margin-right: 12px !important;
-  }
-
-  .action-group .el-button {
-    padding: 6px 10px;
-  }
+.task-secondary {
+  color: #738295;
+  font-size: 12px;
+  margin-top: 5px;
 }
 </style>

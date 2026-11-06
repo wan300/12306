@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { desktopPayload } from './desktopPayload'
 
 const ACCESS_TOKEN_KEY = 'accessToken'
 
@@ -20,7 +21,7 @@ const setStoredAccessToken = (token) => {
 // 开发模式使用Vite代理，生产模式直接访问后端
 const getBaseURL = () => {
   // 检查是否在Electron生产环境中
-  if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
+  if (typeof window !== 'undefined' && window.electronAPI) {
     // Electron生产模式：使用主进程传递的后端地址，避免端口冲突导致 404
     const backendUrl = window.electronAPI.getBackendUrl?.()
     return backendUrl || 'http://127.0.0.1:8000/api/v1'
@@ -40,7 +41,7 @@ const normalizeWsBase = (url) => {
 const getTerminalLogsWsUrl = () => {
   const token = getStoredAccessToken()
 
-  if (typeof window !== 'undefined' && window.electronAPI && !import.meta.env.DEV) {
+  if (typeof window !== 'undefined' && window.electronAPI) {
     const backendUrl = window.electronAPI.getBackendUrl?.() || 'http://127.0.0.1:8000/api/v1'
     const wsUrl = `${normalizeWsBase(backendUrl)}/logs/ws/terminal`
     return token ? `${wsUrl}?token=${encodeURIComponent(token)}` : wsUrl
@@ -75,9 +76,7 @@ request.interceptors.response.use(
       if (typeof window !== 'undefined') {
         localStorage.removeItem('currentUserId')
         localStorage.removeItem('currentUser')
-        if (window.location.hash !== '#/login') {
-          window.location.hash = '#/login'
-        }
+        window.dispatchEvent(new Event('rail-auth-expired'))
       }
     }
 
@@ -86,6 +85,15 @@ request.interceptors.response.use(
     return Promise.reject(new Error(message))
   }
 )
+
+async function notificationRequest(method, route, body) {
+  if (window.electronAPI?.workspace) {
+    const response = await window.electronAPI.workspace.request(method, route, desktopPayload(body))
+    if (!response.success) throw new Error(response.message)
+    return response.data
+  }
+  return request.request({ method, url: route, data: body })
+}
 
 export default {
   setAccessToken(token) {
@@ -170,15 +178,15 @@ export default {
 
   // ========== 通知配置 ==========
   getNotificationConfig() {
-    return request.get('/config/notification')
+    return notificationRequest('GET', '/config/notification')
   },
 
   updateNotificationConfig(data) {
-    return request.post('/config/notification', data)
+    return notificationRequest('POST', '/config/notification', data)
   },
 
   testNotification(data) {
-    return request.post('/config/notification/test', data)
+    return notificationRequest('POST', '/config/notification/test', data)
   },
 
   getTerminalLogsWsUrl
